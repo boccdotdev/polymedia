@@ -1,6 +1,6 @@
 {
     "name": "boccdotdev/polymedia",
-    "description": "Universal media field for Craft CMS — HLS, YouTube, Vimeo, Spotify, MP4 and audio as first-class assets, with Media Chrome compatible player rendering.",
+    "description": "Universal media field for Craft CMS. Media URLs as native assets, with optional front-end rendering via Media Chrome.",
     "type": "craft-plugin",
     "license": "MIT",
     "keywords": [
