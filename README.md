@@ -27,9 +27,8 @@ Create a **Polymedia** field (appears in the field type picker). It extends the 
 
 Field settings:
 - **Allowed Providers** — restrict which provider types can be selected (e.g. only YouTube + Mux). Leave empty for all.
-- **Allow Poster Override** — let editors set a per-placement poster image that overrides the item-level poster.
 
-> **Note:** The native Assets field still works with `.pmedia` files for headless or advanced use cases, but loses provider filtering and per-placement poster overrides.
+> **Note:** The native Assets field still works with `.pmedia` files for headless or advanced use cases, but loses provider filtering.
 
 ## Adding Media
 
@@ -174,15 +173,10 @@ Use the `children` option to add Media Chrome control elements:
 
 Poster resolution order (highest priority first):
 1. Explicit `poster` option in Twig (`false` suppresses entirely)
-2. Per-placement override (from PolymediaField)
-3. Item-level poster (attached via asset edit screen)
-4. Derived thumbnail from manifest (auto-generated for YouTube, Vimeo, Mux, Cloudflare, Wistia)
+2. Item-level poster (attached via asset edit screen)
+3. Derived thumbnail from manifest (auto-generated for YouTube, Vimeo, Mux, Cloudflare, Wistia)
 
 For audio types, the poster is emitted as `<img slot="poster" class="polymedia-cover">` inside `<media-controller audio>` — available to themes that render a "now playing" cover.
-
-## Per-Placement Poster Override
-
-With `Allow Poster Override` enabled on your Polymedia field, editors can set a different poster image for each placement of a media asset. Different sites get independent overrides automatically.
 
 ## Accessibility
 
@@ -211,7 +205,7 @@ Disable the warning in plugin settings if your setup handles access control at t
 | Wistia | `<wistia-video>` | `*.wistia.com` |
 | JW Player | `<jwplayer-video>` | `cdn.jwplayer.com` |
 | Twitch | `<twitch-video>` | `twitch.tv` |
-| Cloudflare | `<cloudflare-video>` | `videodelivery.net` |
+| Cloudflare | `<cloudflare-video>` | `videodelivery.net`, `cloudflarestream.com` |
 | PeerTube | `<peertube-video>` | Manual only |
 | Video.js | `<videojs-video>` | Manual only |
 | MP4/WebM/MOV | `<video>` | `.mp4`, `.webm`, `.mov` |
