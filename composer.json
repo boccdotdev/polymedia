@@ -1,0 +1,64 @@
+{
+    "name": "boccdotdev/polymedia",
+    "description": "Universal media field for Craft CMS — HLS, YouTube, Vimeo, Spotify, MP4 and audio as first-class assets, with Media Chrome compatible player rendering.",
+    "type": "craft-plugin",
+    "license": "MIT",
+    "keywords": [
+        "craft",
+        "craft-plugin",
+        "craft5",
+        "video",
+        "audio",
+        "hls",
+        "media-chrome",
+        "spotify",
+        "mux",
+        "vimeo",
+        "youtube"
+    ],
+    "authors": [
+        {
+            "name": "William Bocchinelli",
+            "email": "will@bocc.dev"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/boccdotdev/polymedia/issues",
+        "source": "https://github.com/boccdotdev/polymedia"
+    },
+    "require": {
+        "php": "^8.2",
+        "craftcms/cms": "^5.0.0"
+    },
+    "require-dev": {
+        "craftcms/ecs": "dev-main",
+        "craftcms/phpstan": "dev-main",
+        "codeception/codeception": "^5.0",
+        "phpunit/phpunit": "^10.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "boccdotdev\\polymedia\\": "src/"
+        }
+    },
+    "extra": {
+        "name": "Polymedia",
+        "handle": "polymedia",
+        "developer": "boccdotdev",
+        "documentationUrl": "https://github.com/boccdotdev/polymedia",
+        "class": "boccdotdev\\polymedia\\Plugin"
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "boccdotdev\\polymedia\\tests\\": "tests/"
+        }
+    },
+    "config": {
+        "allow-plugins": {
+            "yiisoft/yii2-composer": true,
+            "craftcms/plugin-installer": true
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}

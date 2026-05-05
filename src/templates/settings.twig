@@ -1,0 +1,199 @@
+{% import '_includes/forms.twig' as forms %}
+
+{% set allowAdminChanges = craft.app.config.general.allowAdminChanges %}
+
+<h2>{{ 'Volumes'|t('polymedia') }}</h2>
+
+{{ forms.selectField({
+    label: 'Default Volume'|t('polymedia'),
+    instructions: 'Where new media URL manifest files (.pmedia) are saved.'|t('polymedia'),
+    id: 'defaultVolumeUid',
+    name: 'defaultVolumeUid',
+    value: settings.defaultVolumeUid,
+    options: volumeOptions,
+    errors: settings.getErrors('defaultVolumeUid'),
+    disabled: not allowAdminChanges,
+}) }}
+
+{{ forms.selectField({
+    label: 'Attachments Volume'|t('polymedia'),
+    instructions: 'Where inline-uploaded posters, captions, and transcripts are saved. Falls back to the default volume if not set.'|t('polymedia'),
+    id: 'attachmentsVolumeUid',
+    name: 'attachmentsVolumeUid',
+    value: settings.attachmentsVolumeUid,
+    options: volumeOptions,
+    errors: settings.getErrors('attachmentsVolumeUid'),
+    disabled: not allowAdminChanges,
+}) }}
+
+<hr>
+
+<h2>{{ 'Scripts'|t('polymedia') }}</h2>
+
+{{ forms.selectField({
+    label: 'Script Loader Mode'|t('polymedia'),
+    instructions: 'How front-end Media Chrome scripts are loaded.'|t('polymedia'),
+    id: 'scriptLoaderMode',
+    name: 'scriptLoaderMode',
+    value: settings.scriptLoaderMode,
+    options: [
+        { label: 'CDN (default)'|t('polymedia'), value: 'cdn' },
+        { label: 'Self-hosted'|t('polymedia'), value: 'self-host' },
+        { label: 'None (manual)'|t('polymedia'), value: 'none' },
+    ],
+    errors: settings.getErrors('scriptLoaderMode'),
+    disabled: not allowAdminChanges,
+}) }}
+
+{{ forms.autosuggestField({
+    label: 'CDN Host'|t('polymedia'),
+    instructions: 'CDN hostname for script tags. Default is `cdn.jsdelivr.net`.'|t('polymedia'),
+    id: 'cdnHost',
+    name: 'cdnHost',
+    value: settings.cdnHost,
+    suggestEnvVars: true,
+    errors: settings.getErrors('cdnHost'),
+    disabled: not allowAdminChanges,
+}) }}
+
+{{ forms.autosuggestField({
+    label: 'Self-Host Base URL'|t('polymedia'),
+    instructions: 'Base URL for self-hosted scripts, e.g. `/dist/polymedia/`.'|t('polymedia'),
+    id: 'selfHostBaseUrl',
+    name: 'selfHostBaseUrl',
+    value: settings.selfHostBaseUrl,
+    suggestEnvVars: true,
+    suggestAliases: true,
+    errors: settings.getErrors('selfHostBaseUrl'),
+    disabled: not allowAdminChanges,
+}) }}
+
+{{ forms.textField({
+    label: 'Media Chrome Version'|t('polymedia'),
+    instructions: 'Major version of Media Chrome for the `scripts()` Twig helper.'|t('polymedia'),
+    id: 'mediaChromeVersion',
+    name: 'mediaChromeVersion',
+    value: settings.mediaChromeVersion,
+    size: 4,
+    errors: settings.getErrors('mediaChromeVersion'),
+    disabled: not allowAdminChanges,
+}) }}
+
+{{ forms.checkboxGroupField({
+    label: 'Default Providers'|t('polymedia'),
+    instructions: 'Providers included when `scripts()` is called without arguments.'|t('polymedia'),
+    id: 'defaultProviders',
+    name: 'defaultProviders',
+    values: settings.defaultProviders,
+    options: [
+        { label: 'HLS', value: 'hls' },
+        { label: 'DASH', value: 'dash' },
+        { label: 'Shaka', value: 'shaka' },
+        { label: 'Mux', value: 'mux' },
+        { label: 'YouTube', value: 'youtube' },
+        { label: 'Vimeo', value: 'vimeo' },
+        { label: 'Spotify', value: 'spotify' },
+        { label: 'TikTok', value: 'tiktok' },
+        { label: 'Wistia', value: 'wistia' },
+        { label: 'JW Player', value: 'jwplayer' },
+        { label: 'Twitch', value: 'twitch' },
+        { label: 'Cloudflare', value: 'cloudflare' },
+        { label: 'PeerTube', value: 'peertube' },
+        { label: 'Video.js', value: 'videojs' },
+    ],
+    disabled: not allowAdminChanges,
+}) }}
+
+<hr>
+
+<h2>{{ 'Behaviour'|t('polymedia') }}</h2>
+
+{{ forms.lightswitchField({
+    label: 'Auto-Fetch Poster'|t('polymedia'),
+    instructions: 'Automatically download derived poster thumbnails when creating media items (YouTube, Vimeo, Mux, Cloudflare, Wistia).'|t('polymedia'),
+    id: 'autoFetchPoster',
+    name: 'autoFetchPoster',
+    on: settings.autoFetchPoster,
+    disabled: not allowAdminChanges,
+}) }}
+
+{{ forms.lightswitchField({
+    label: 'Validate VTT on Upload'|t('polymedia'),
+    instructions: 'Check for a valid `WEBVTT` header when attaching caption files.'|t('polymedia'),
+    id: 'validateVttOnUpload',
+    name: 'validateVttOnUpload',
+    on: settings.validateVttOnUpload,
+    disabled: not allowAdminChanges,
+}) }}
+
+{{ forms.lightswitchField({
+    label: 'Require Captions for Video'|t('polymedia'),
+    instructions: 'Show a warning (not an error) when saving a video-type item with no captions attached.'|t('polymedia'),
+    id: 'requireCaptionsForVideo',
+    name: 'requireCaptionsForVideo',
+    on: settings.requireCaptionsForVideo,
+    disabled: not allowAdminChanges,
+}) }}
+
+{{ forms.lightswitchField({
+    label: 'Caption Language from Site'|t('polymedia'),
+    instructions: "Auto-set the caption row's site to match the current CP site when uploading."|t('polymedia'),
+    id: 'defaultCaptionLanguageFromSite',
+    name: 'defaultCaptionLanguageFromSite',
+    on: settings.defaultCaptionLanguageFromSite,
+    disabled: not allowAdminChanges,
+}) }}
+
+{{ forms.lightswitchField({
+    label: 'Restrict Asset Kinds'|t('polymedia'),
+    instructions: 'Allow native Assets fields to be restricted to polymedia kinds only.'|t('polymedia'),
+    id: 'restrictAssetKinds',
+    name: 'restrictAssetKinds',
+    on: settings.restrictAssetKinds,
+    disabled: not allowAdminChanges,
+}) }}
+
+<hr>
+
+<h2>{{ 'Security'|t('polymedia') }}</h2>
+
+{{ forms.lightswitchField({
+    label: 'Signed URL Warning'|t('polymedia'),
+    instructions: 'Show a confirmation prompt when saving a media URL with signed tokens into a publicly accessible volume.'|t('polymedia'),
+    id: 'warnOnSignedUrlInPublicVolume',
+    name: 'warnOnSignedUrlInPublicVolume',
+    on: settings.warnOnSignedUrlInPublicVolume,
+    disabled: not allowAdminChanges,
+}) }}
+
+<hr>
+
+<h2>{{ 'Field Defaults'|t('polymedia') }}</h2>
+
+{{ forms.checkboxGroupField({
+    label: 'Default Allowed Providers'|t('polymedia'),
+    instructions: 'Default provider restriction for new Polymedia fields. Empty means all providers allowed.'|t('polymedia'),
+    id: 'defaultFieldAllowedProviders',
+    name: 'defaultFieldAllowedProviders',
+    values: settings.defaultFieldAllowedProviders,
+    options: [
+        { label: 'HLS', value: 'hls' },
+        { label: 'DASH', value: 'dash' },
+        { label: 'Shaka', value: 'shaka' },
+        { label: 'Mux', value: 'mux' },
+        { label: 'YouTube', value: 'youtube' },
+        { label: 'Vimeo', value: 'vimeo' },
+        { label: 'Spotify', value: 'spotify' },
+        { label: 'TikTok', value: 'tiktok' },
+        { label: 'Wistia', value: 'wistia' },
+        { label: 'JW Player', value: 'jwplayer' },
+        { label: 'Twitch', value: 'twitch' },
+        { label: 'Cloudflare', value: 'cloudflare' },
+        { label: 'PeerTube', value: 'peertube' },
+        { label: 'Video.js', value: 'videojs' },
+        { label: 'MP4/WebM/MOV', value: 'mp4' },
+        { label: 'Audio', value: 'audio' },
+    ],
+    disabled: not allowAdminChanges,
+}) }}
+

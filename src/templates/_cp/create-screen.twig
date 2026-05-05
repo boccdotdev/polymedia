@@ -1,0 +1,86 @@
+{% import '_includes/forms.twig' as forms %}
+
+{{ forms.textField({
+    label: 'URL'|t('polymedia'),
+    instructions: 'Paste the media URL (YouTube, Vimeo, HLS, MP4, Spotify, etc.)'|t('polymedia'),
+    id: 'url',
+    name: 'url',
+    placeholder: 'https://',
+    required: true,
+    autofocus: true,
+}) }}
+
+{{ forms.textField({
+    label: 'Title'|t('polymedia'),
+    instructions: 'Display title for this media item.'|t('polymedia'),
+    id: 'title',
+    name: 'title',
+    required: true,
+}) }}
+
+{{ forms.selectField({
+    label: 'Force Type'|t('polymedia'),
+    instructions: 'Override auto-detection. Use for Shaka, Video.js, PeerTube, or when auto-detect picks the wrong type.'|t('polymedia'),
+    id: 'typeOverride',
+    name: 'typeOverride',
+    options: [{label: 'Auto-detect'|t('polymedia'), value: ''}]|merge(
+        providerTypes|map(t => {label: t|capitalize, value: t})
+    ),
+}) }}
+
+{{ forms.selectField({
+    label: 'Volume'|t('polymedia'),
+    id: 'volumeId',
+    name: 'volumeId',
+    options: volumeOptions,
+    value: defaultVolumeId,
+    required: true,
+}) }}
+
+{{ forms.hidden({
+    id: 'folderId',
+    name: 'folderId',
+    value: defaultFolderId,
+}) }}
+
+{% if warnOnSignedUrl %}
+    <div id="polymedia-signed-url-warning" class="readable" style="display: none;">
+        <blockquote class="note warning">
+            <p>{{ 'This URL appears to contain a signed token or API key. Saving it to a publicly accessible volume means anyone with access to the volume can see the full URL.'|t('polymedia') }}</p>
+        </blockquote>
+        {{ forms.checkboxField({
+            label: 'I understand the security implications'|t('polymedia'),
+            id: 'confirmedSignedUrlWarning',
+            name: 'confirmedSignedUrlWarning',
+            value: '1',
+        }) }}
+    </div>
+{% endif %}
+
+{% js %}
+(function() {
+    var folderOptions = {{ folderOptionsJson|raw }};
+    var $volumeSelect = $('#{{ 'volumeId'|namespaceInputId }}');
+    var $folderInput = $('#{{ 'folderId'|namespaceInputId }}');
+
+    $volumeSelect.on('change', function() {
+        var volumeId = $(this).val();
+        $folderInput.val(folderOptions[volumeId] || '');
+    });
+
+    {% if warnOnSignedUrl %}
+    var signedPatterns = [
+        /[?&](token|sig|signature|Policy|Signature|KeyPair-Id|Key-Pair-Id)=/i,
+        /[?&]token=eyJ/
+    ];
+    var $urlField = $('#{{ 'url'|namespaceInputId }}');
+    var $warning = $('#polymedia-signed-url-warning');
+
+    $urlField.on('change blur', function() {
+        var url = $(this).val();
+        var isSigned = signedPatterns.some(function(p) { return p.test(url); });
+        $warning.toggle(isSigned);
+    });
+    {% endif %}
+})();
+{% endjs %}
