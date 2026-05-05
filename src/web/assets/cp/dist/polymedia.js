@@ -13,10 +13,6 @@
     },
 
     injectButton: function (assetIndex) {
-      if (assetIndex.modal || assetIndex.$container.closest('.modal, .slideout').length) {
-        return;
-      }
-
       var $toolbar = assetIndex.$toolbar;
 
       if (!$toolbar || !$toolbar.length) {
@@ -42,11 +38,11 @@
       }
 
       $btn.on('click', function () {
-        Craft.Polymedia.openSlideout();
+        Craft.Polymedia.openSlideout(assetIndex);
       });
     },
 
-    openSlideout: function () {
+    openSlideout: function (assetIndex) {
       var slideout = new Craft.CpScreenSlideout(
         'polymedia/media-items/create-screen'
       );
@@ -54,7 +50,9 @@
       slideout.on('submit', function () {
         Craft.cp.displayNotice(Craft.t('polymedia', 'Media item created.'));
 
-        if (Craft.elementIndex) {
+        if (assetIndex) {
+          assetIndex.updateElements();
+        } else if (Craft.elementIndex) {
           Craft.elementIndex.updateElements();
         }
       });
