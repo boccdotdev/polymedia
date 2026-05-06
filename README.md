@@ -106,6 +106,66 @@ Returns track-type related assets (captions, subtitles, descriptions).
 
 Returns the transcript related asset.
 
+## Asset Methods
+
+Polymedia attaches a behavior to every `Asset` element so you can call media accessors directly on the asset — no `craft.polymedia.*` wrapper required. The methods mirror the Twig API one-to-one.
+
+```twig
+{% set media = entry.heroMedia.one() %}
+
+{{ media.getPlayer() }}
+{{ media.getElement() }}
+{{ media.getPoster() }}
+{% set data = media.getData() %}
+{% for track in media.getTracks('captions') %}…{% endfor %}
+{% set transcript = media.getTranscript() %}
+
+{% if media.isPolymedia %}…{% endif %}
+```
+
+Twig getter shorthand also works — drop the `get` and the parens:
+
+```twig
+{{ media.player }}    {# = media.getPlayer() #}
+{{ media.poster }}    {# = media.getPoster() #}
+{{ media.data.title }}
+```
+
+### Available methods
+
+| Method | Returns | Equivalent |
+|--------|---------|------------|
+| `getPlayer(options = {})` | `Markup` | `craft.polymedia.player(asset, options)` |
+| `getElement(options = {})` | `Markup` | `craft.polymedia.element(asset, options)` |
+| `getData()` | `array` | `craft.polymedia.data(asset)` |
+| `getPoster()` | `string\|null` | `craft.polymedia.poster(asset)` |
+| `getTracks(role = 'captions', siteId = null)` | `Asset[]` | `craft.polymedia.tracks(asset, role, siteId)` |
+| `getTranscript()` | `Asset\|null` | `craft.polymedia.transcript(asset)` |
+| `getIsPolymedia()` | `bool` | `craft.polymedia.is(asset)` |
+
+The behavior is attached to all assets, but the methods safely return empty values for non-polymedia assets — guard with `media.isPolymedia` if you mix asset kinds in the same template.
+
+### Choosing between styles
+
+Use the asset method style for terse, asset-centric templates:
+
+```twig
+{% for media in entry.gallery.all() %}
+    <figure>
+        {{ media.getPlayer({ controls: true }) }}
+        <figcaption>{{ media.title }}</figcaption>
+    </figure>
+{% endfor %}
+```
+
+Use `craft.polymedia.*` when you're checking arbitrary values, in macros, or in shared partials where the input may not be an asset:
+
+```twig
+{% if craft.polymedia.is(value) %}
+    {{ craft.polymedia.player(value) }}
+{% endif %}
+```
+
 ## Examples by Provider
 
 ### YouTube

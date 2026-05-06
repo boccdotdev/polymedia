@@ -11,6 +11,7 @@
 
 namespace boccdotdev\polymedia;
 
+use boccdotdev\polymedia\behaviors\PolymediaAssetBehavior;
 use boccdotdev\polymedia\models\DetectionResult;
 use boccdotdev\polymedia\models\PlayerSettings;
 use boccdotdev\polymedia\models\Settings;
@@ -33,6 +34,7 @@ use craft\base\Plugin as BasePlugin;
 use craft\controllers\ElementsController;
 use craft\elements\Asset;
 use craft\events\DefineAttributeHtmlEvent;
+use craft\events\DefineBehaviorsEvent;
 use craft\events\DefineElementEditorHtmlEvent;
 use craft\events\ModelEvent;
 use craft\events\RegisterAssetFileKindsEvent;
@@ -115,6 +117,7 @@ class Plugin extends BasePlugin
         $this->_registerAssetReconciler();
         $this->_registerEditorContent();
         $this->_registerFieldType();
+        $this->_registerAssetBehavior();
         $this->_registerTwigVariable();
         $this->_registerCpAssets();
     }
@@ -708,6 +711,22 @@ class Plugin extends BasePlugin
             Fields::EVENT_REGISTER_FIELD_TYPES,
             function(RegisterComponentTypesEvent $e) {
                 $e->types[] = PolymediaField::class;
+            },
+        );
+    }
+
+    /**
+     * Attaches {@see PolymediaAssetBehavior} to every {@see Asset}, exposing
+     * `getPlayer()`, `getElement()`, `getData()`, `getPoster()`, `getTracks()`,
+     * `getTranscript()`, and `getIsPolymedia()` to templates.
+     */
+    private function _registerAssetBehavior(): void
+    {
+        Event::on(
+            Asset::class,
+            Asset::EVENT_DEFINE_BEHAVIORS,
+            function(DefineBehaviorsEvent $event) {
+                $event->behaviors['polymedia'] = PolymediaAssetBehavior::class;
             },
         );
     }

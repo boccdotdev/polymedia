@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.2 - 2026-05-06
+
+### Added
+- `PolymediaAssetBehavior` attached to all `Asset` elements, exposing `getPlayer()`, `getElement()`, `getData()`, `getPoster()`, `getTracks()`, `getTranscript()`, and `getIsPolymedia()` directly on assets in Twig.
+
+## 1.0.1 - 2026-05-06
+
+### Fixed
+- Restored "Add Media URL" button in asset selection modals and slideouts.
+
 ## 1.0.0 - 2026-05-04
 
 ### Added
