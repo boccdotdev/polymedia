@@ -24,5 +24,5 @@ abstract class Table
 
     public const MEDIA_ITEMS = '{{%polymedia_items}}';
     public const RELATED_ASSETS = '{{%polymedia_related_assets}}';
-    public const FIELD_RELATIONS = '{{%polymedia_field_relations}}';
+    public const FIELD_SETTINGS = '{{%polymedia_field_settings}}';
 }

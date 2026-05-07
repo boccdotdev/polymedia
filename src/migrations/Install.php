@@ -19,7 +19,7 @@ use craft\db\Table as CraftTable;
  * Install migration for the Polymedia plugin.
  *
  * Creates `polymedia_items`, `polymedia_related_assets`, and
- * `polymedia_field_relations` tables with foreign keys and indexes.
+ * `polymedia_field_settings` tables with foreign keys and indexes.
  *
  * @author boccdotdev
  * @since 1.0.0
@@ -36,7 +36,7 @@ class Install extends Migration
     {
         $this->_createMediaItemsTable();
         $this->_createRelatedAssetsTable();
-        $this->_createFieldRelationsTable();
+        $this->_createFieldSettingsTable();
 
         return true;
     }
@@ -46,7 +46,7 @@ class Install extends Migration
      */
     public function safeDown(): bool
     {
-        $this->dropTableIfExists(Table::FIELD_RELATIONS);
+        $this->dropTableIfExists(Table::FIELD_SETTINGS);
         $this->dropTableIfExists(Table::RELATED_ASSETS);
         $this->dropTableIfExists(Table::MEDIA_ITEMS);
 
@@ -115,22 +115,23 @@ class Install extends Migration
     }
 
     /**
-     * Creates the `polymedia_field_relations` table.
+     * Creates the `polymedia_field_settings` table.
+     *
+     * Stores per-field Polymedia settings (e.g. `allowedProviders`) for plain
+     * Assets fields where the `polymedia` kind is enabled. Keyed by field UID
+     * so the row survives field renames.
      */
-    private function _createFieldRelationsTable(): void
+    private function _createFieldSettingsTable(): void
     {
-        $this->createTable(Table::FIELD_RELATIONS, [
+        $this->createTable(Table::FIELD_SETTINGS, [
             'id' => $this->primaryKey(),
-            'relationId' => $this->integer()->notNull(),
-            'posterAssetId' => $this->integer(),
+            'fieldUid' => $this->char(36)->notNull(),
+            'allowedProviders' => $this->text(),
             'dateCreated' => $this->dateTime()->notNull(),
             'dateUpdated' => $this->dateTime()->notNull(),
             'uid' => $this->uid(),
         ]);
 
-        $this->createIndex(null, Table::FIELD_RELATIONS, ['relationId'], true);
-
-        $this->addForeignKey(null, Table::FIELD_RELATIONS, ['relationId'], CraftTable::RELATIONS, ['id'], 'CASCADE', null);
-        $this->addForeignKey(null, Table::FIELD_RELATIONS, ['posterAssetId'], CraftTable::ASSETS, ['id'], 'SET NULL', null);
+        $this->createIndex(null, Table::FIELD_SETTINGS, ['fieldUid'], true);
     }
 }

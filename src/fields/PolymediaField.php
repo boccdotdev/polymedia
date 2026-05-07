@@ -14,8 +14,6 @@ namespace boccdotdev\polymedia\fields;
 use boccdotdev\polymedia\Plugin;
 use Craft;
 use craft\base\ElementInterface;
-use craft\elements\Asset;
-use craft\elements\db\AssetQuery;
 use craft\fields\Assets;
 use craft\helpers\Cp;
 
@@ -68,8 +66,6 @@ class PolymediaField extends Assets
      */
     public function __construct(array $config = [])
     {
-        unset($config['allowPosterOverride']);
-
         $config['restrictFiles'] = true;
         $config['allowedKinds'] = ['polymedia'];
         $config['allowUploads'] = false;
@@ -164,36 +160,6 @@ class PolymediaField extends Assets
      */
     public function validateProviderFilter(ElementInterface $element): void
     {
-        if (empty($this->allowedProviders)) {
-            return;
-        }
-
-        /** @var AssetQuery $value */
-        $value = $element->getFieldValue($this->handle);
-        $plugin = Plugin::getInstance();
-
-        foreach ($value->all() as $asset) {
-            /** @var Asset $asset */
-            if ($asset->kind !== 'polymedia') {
-                continue;
-            }
-
-            $record = $plugin->getMediaItems()->getByAssetId($asset->id);
-
-            if (!$record) {
-                continue;
-            }
-
-            if (!in_array($record->type, $this->allowedProviders, true)) {
-                $element->addError(
-                    $this->handle,
-                    Craft::t(
-                        'polymedia',
-                        '"{title}" is a {type} media item, which is not allowed by this field.',
-                        ['title' => $asset->title, 'type' => ucfirst($record->type)],
-                    ),
-                );
-            }
-        }
+        Plugin::getInstance()->getProviderFilter()->validate($element, $this->handle, $this->allowedProviders);
     }
 }

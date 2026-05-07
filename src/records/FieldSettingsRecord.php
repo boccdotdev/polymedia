@@ -15,21 +15,19 @@ use boccdotdev\polymedia\db\Table;
 use craft\db\ActiveRecord;
 
 /**
- * ActiveRecord for the `polymedia_field_relations` table.
- *
- * Stores per-placement poster overrides for PolymediaField, keyed by relation ID.
+ * ActiveRecord for the `polymedia_field_settings` table.
  *
  * @property int $id
- * @property int $relationId
- * @property ?int $posterAssetId
+ * @property string $fieldUid
+ * @property ?string $allowedProviders
  * @property string $dateCreated
  * @property string $dateUpdated
  * @property string $uid
  *
  * @author boccdotdev
- * @since 1.0.0
+ * @since 1.1.0
  */
-class FieldRelationRecord extends ActiveRecord
+class FieldSettingsRecord extends ActiveRecord
 {
     // Public Methods
     // =========================================================================
@@ -39,6 +37,6 @@ class FieldRelationRecord extends ActiveRecord
      */
     public static function tableName(): string
     {
-        return Table::FIELD_RELATIONS;
+        return Table::FIELD_SETTINGS;
     }
 }

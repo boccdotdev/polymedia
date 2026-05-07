@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.0 - 2026-05-07
+
+### Added
+- "Allowed Providers" setting on plain `craft\fields\Assets` fields when the `polymedia` kind is enabled. Mirrors the same filter on `PolymediaField`, so any Assets field can restrict media URL selections to specific providers. Toggles live as the kind is checked/unchecked.
+- `polymedia_field_settings` table for per-field plugin settings keyed by field UID.
+- `AssetFieldSettings`, `ProviderFilter` services. `PolymediaAssetFieldBehavior` attached to native Assets fields.
+- Plugin icon (`src/icon.svg`).
+
+### Changed
+- Provider filter validation extracted to a shared service. `PolymediaField` and plain Assets fields now run identical validation logic.
+
+### Removed
+- Unused per-placement poster override code (`FieldOverrides` service, `FieldRelationRecord`, `polymedia_field_relations` table). The schema, service, and `allowPosterOverride` config key were never reachable from Twig or the CP UI.
+
 ## 1.0.2 - 2026-05-06
 
 ### Added

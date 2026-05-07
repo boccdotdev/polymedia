@@ -1,6 +1,7 @@
 /vendor/
 /composer.lock
 /.phpunit.cache/
+/.phpunit.result.cache
 /tests/_output/
 .DS_Store
 .idea/

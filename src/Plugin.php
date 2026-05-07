@@ -12,15 +12,17 @@
 namespace boccdotdev\polymedia;
 
 use boccdotdev\polymedia\behaviors\PolymediaAssetBehavior;
+use boccdotdev\polymedia\behaviors\PolymediaAssetFieldBehavior;
 use boccdotdev\polymedia\models\DetectionResult;
 use boccdotdev\polymedia\models\PlayerSettings;
 use boccdotdev\polymedia\models\Settings;
 use boccdotdev\polymedia\records\MediaItemRecord;
 use boccdotdev\polymedia\records\RelatedAssetRecord;
 use boccdotdev\polymedia\fields\PolymediaField;
-use boccdotdev\polymedia\services\FieldOverrides;
+use boccdotdev\polymedia\services\AssetFieldSettings;
 use boccdotdev\polymedia\services\ManifestWriter;
 use boccdotdev\polymedia\services\MediaItems;
+use boccdotdev\polymedia\services\ProviderFilter;
 use boccdotdev\polymedia\services\RelatedAssets;
 use boccdotdev\polymedia\services\Renderer;
 use boccdotdev\polymedia\services\ThumbnailDeriver;
@@ -36,11 +38,14 @@ use craft\elements\Asset;
 use craft\events\DefineAttributeHtmlEvent;
 use craft\events\DefineBehaviorsEvent;
 use craft\events\DefineElementEditorHtmlEvent;
+use craft\events\FieldEvent;
 use craft\events\ModelEvent;
 use craft\events\RegisterAssetFileKindsEvent;
 use craft\events\RegisterComponentTypesEvent;
 use craft\events\RegisterElementSortOptionsEvent;
 use craft\events\RegisterElementTableAttributesEvent;
+use craft\events\TemplateEvent;
+use craft\fields\Assets as AssetsField;
 use craft\helpers\Assets;
 use craft\helpers\Cp;
 use craft\helpers\Html;
@@ -59,8 +64,9 @@ use yii\base\Event;
  * @property-read ManifestWriter $manifestWriter
  * @property-read MediaItems $mediaItems
  * @property-read RelatedAssets $relatedAssets
- * @property-read FieldOverrides $fieldOverrides
  * @property-read Renderer $renderer
+ * @property-read AssetFieldSettings $assetFieldSettings
+ * @property-read ProviderFilter $providerFilter
  *
  * @author boccdotdev
  * @since 1.0.0
@@ -73,7 +79,7 @@ class Plugin extends BasePlugin
     /**
      * @var string
      */
-    public string $schemaVersion = '1.0.0';
+    public string $schemaVersion = '1.1.0';
 
     /**
      * @var bool
@@ -107,8 +113,9 @@ class Plugin extends BasePlugin
             'manifestWriter' => ManifestWriter::class,
             'mediaItems' => MediaItems::class,
             'relatedAssets' => RelatedAssets::class,
-            'fieldOverrides' => FieldOverrides::class,
             'renderer' => Renderer::class,
+            'assetFieldSettings' => AssetFieldSettings::class,
+            'providerFilter' => ProviderFilter::class,
         ]);
 
         $this->_registerFileKind();
@@ -118,6 +125,10 @@ class Plugin extends BasePlugin
         $this->_registerEditorContent();
         $this->_registerFieldType();
         $this->_registerAssetBehavior();
+        $this->_registerAssetFieldBehavior();
+        $this->_registerAssetFieldSettingsUi();
+        $this->_registerAssetFieldPersistence();
+        $this->_registerAssetFieldValidation();
         $this->_registerTwigVariable();
         $this->_registerCpAssets();
     }
@@ -188,19 +199,6 @@ class Plugin extends BasePlugin
     }
 
     /**
-     * Returns the field overrides service.
-     *
-     * @return FieldOverrides
-     *
-     * @author boccdotdev
-     * @since 1.0.0
-     */
-    public function getFieldOverrides(): FieldOverrides
-    {
-        return $this->get('fieldOverrides');
-    }
-
-    /**
      * Returns the renderer service.
      *
      * @return Renderer
@@ -211,6 +209,32 @@ class Plugin extends BasePlugin
     public function getRenderer(): Renderer
     {
         return $this->get('renderer');
+    }
+
+    /**
+     * Returns the asset field settings service.
+     *
+     * @return AssetFieldSettings
+     *
+     * @author boccdotdev
+     * @since 1.1.0
+     */
+    public function getAssetFieldSettings(): AssetFieldSettings
+    {
+        return $this->get('assetFieldSettings');
+    }
+
+    /**
+     * Returns the provider filter service.
+     *
+     * @return ProviderFilter
+     *
+     * @author boccdotdev
+     * @since 1.1.0
+     */
+    public function getProviderFilter(): ProviderFilter
+    {
+        return $this->get('providerFilter');
     }
 
     // Protected Methods
@@ -761,6 +785,231 @@ class Plugin extends BasePlugin
             View::EVENT_BEFORE_RENDER_TEMPLATE,
             function() {
                 Craft::$app->getView()->registerAssetBundle(PolymediaAsset::class);
+            },
+        );
+    }
+
+    /**
+     * Attaches {@see PolymediaAssetFieldBehavior} to native `craft\fields\Assets`
+     * instances, exposing `allowedProviders` and `allowsPolymediaKind` accessors.
+     *
+     * Skipped for {@see PolymediaField} (subclass) which has its own native
+     * `allowedProviders` typed property.
+     */
+    private function _registerAssetFieldBehavior(): void
+    {
+        Event::on(
+            AssetsField::class,
+            AssetsField::EVENT_DEFINE_BEHAVIORS,
+            function(DefineBehaviorsEvent $event) {
+                if ($event->sender instanceof PolymediaField) {
+                    return;
+                }
+
+                $event->behaviors['polymediaAssetField'] = PolymediaAssetFieldBehavior::class;
+            },
+        );
+    }
+
+    /**
+     * Appends the "Allowed Providers" checkbox group to the Assets field
+     * settings template when the `polymedia` kind is enabled (or no kind
+     * restriction is set).
+     */
+    private function _registerAssetFieldSettingsUi(): void
+    {
+        Event::on(
+            View::class,
+            View::EVENT_AFTER_RENDER_TEMPLATE,
+            function(TemplateEvent $event) {
+                $template = preg_replace('/\.twig$/', '', $event->template);
+
+                if ($template !== '_components/fieldtypes/Assets/settings') {
+                    return;
+                }
+
+                $field = $event->variables['field'] ?? null;
+
+                if (!($field instanceof AssetsField) || $field instanceof PolymediaField) {
+                    return;
+                }
+
+                $providerTypes = $this->getUrlDetector()->getProviderTypes();
+                $options = [];
+
+                foreach ($providerTypes as $type) {
+                    $options[] = ['label' => ucfirst($type), 'value' => $type];
+                }
+
+                $current = $field->uid
+                    ? $this->getAssetFieldSettings()->getAllowedProviders($field->uid)
+                    : [];
+
+                $polymediaKindEnabled = !$field->restrictFiles
+                    || in_array('polymedia', $field->allowedKinds ?? [], true);
+
+                $providersFieldHtml = Cp::checkboxGroupFieldHtml([
+                    'label' => Craft::t('polymedia', 'Allowed Providers'),
+                    'instructions' => Craft::t('polymedia', 'Restrict which media providers can be selected for `.pmedia` items. Leave all unchecked to allow any provider.'),
+                    'id' => 'polymediaAllowedProviders',
+                    'name' => 'polymediaAllowedProviders',
+                    'values' => $current,
+                    'options' => $options,
+                ]);
+
+                $hiddenClass = $polymediaKindEnabled ? '' : ' hidden';
+                $providersHtml = '<div class="polymedia-allowed-providers-wrapper' . $hiddenClass . '">'
+                    . $providersFieldHtml
+                    . '</div>';
+
+                $anchor = 'data-error-key="allowedKinds">';
+                $pos = strpos($event->output, $anchor);
+
+                if ($pos !== false) {
+                    $closePos = strpos($event->output, '</fieldset>', $pos);
+
+                    if ($closePos !== false) {
+                        $insertPos = $closePos + strlen('</fieldset>');
+                        $event->output = substr($event->output, 0, $insertPos) . $providersHtml . substr($event->output, $insertPos);
+                    } else {
+                        $event->output .= $providersHtml;
+                    }
+                } else {
+                    $event->output .= $providersHtml;
+                }
+
+                Craft::$app->getView()->registerJs(<<<'JS'
+(function() {
+    var wrappers = document.querySelectorAll('.polymedia-allowed-providers-wrapper:not([data-polymedia-bound])');
+
+    wrappers.forEach(function(wrapper) {
+        wrapper.setAttribute('data-polymedia-bound', '1');
+
+        var form = wrapper.closest('form') || document;
+        var restrictInput = form.querySelector('input[name$="[restrictFiles]"]:not([type=hidden]), input[name="restrictFiles"]:not([type=hidden])');
+
+        if (!restrictInput) {
+            restrictInput = form.querySelector('input[name$="[restrictFiles]"], input[name="restrictFiles"]');
+        }
+
+        var polymediaKind = form.querySelector('input[type=checkbox][value="polymedia"][name$="[allowedKinds][]"], input[type=checkbox][value="polymedia"][name="allowedKinds[]"]');
+
+        function isOn(el) {
+            if (!el) return false;
+            if (el.type === 'checkbox') return el.checked;
+            return el.value === '1' || el.value === 'true';
+        }
+
+        function update() {
+            var restrictFiles = isOn(restrictInput);
+            var polymediaAllowed = !restrictFiles || (polymediaKind && polymediaKind.checked);
+            wrapper.classList.toggle('hidden', !polymediaAllowed);
+        }
+
+        if (restrictInput) {
+            restrictInput.addEventListener('change', update);
+        }
+
+        if (polymediaKind) {
+            polymediaKind.addEventListener('change', update);
+        }
+
+        update();
+    });
+})();
+JS);
+            },
+        );
+    }
+
+    /**
+     * Persists / cleans up `allowedProviders` on plain Assets fields.
+     */
+    private function _registerAssetFieldPersistence(): void
+    {
+        Event::on(
+            Fields::class,
+            Fields::EVENT_AFTER_SAVE_FIELD,
+            function(FieldEvent $event) {
+                $field = $event->field;
+
+                if (!($field instanceof AssetsField) || $field instanceof PolymediaField) {
+                    return;
+                }
+
+                $controller = Craft::$app->controller;
+
+                if (!($controller instanceof \craft\controllers\FieldsController)) {
+                    return;
+                }
+
+                $polymediaKindEnabled = !$field->restrictFiles
+                    || in_array('polymedia', $field->allowedKinds ?? [], true);
+
+                if (!$polymediaKindEnabled) {
+                    $this->getAssetFieldSettings()->delete($field->uid);
+                    return;
+                }
+
+                $providers = $field->polymediaAllowedProviders ?? [];
+
+                if (!is_array($providers)) {
+                    $providers = [];
+                }
+
+                $this->getAssetFieldSettings()->setAllowedProviders($field->uid, $providers);
+            },
+        );
+
+        Event::on(
+            Fields::class,
+            Fields::EVENT_AFTER_DELETE_FIELD,
+            function(FieldEvent $event) {
+                $field = $event->field;
+
+                if (!($field instanceof AssetsField) || $field instanceof PolymediaField) {
+                    return;
+                }
+
+                $this->getAssetFieldSettings()->delete($field->uid);
+            },
+        );
+    }
+
+    /**
+     * Validates polymedia provider restrictions on plain Assets fields after
+     * each element validation pass.
+     *
+     * {@see PolymediaField} validates itself via `getElementValidationRules()`
+     * so it is skipped here.
+     */
+    private function _registerAssetFieldValidation(): void
+    {
+        Event::on(
+            Element::class,
+            Element::EVENT_AFTER_VALIDATE,
+            function(Event $event) {
+                /** @var Element $element */
+                $element = $event->sender;
+                $fieldLayout = $element->getFieldLayout();
+
+                if (!$fieldLayout) {
+                    return;
+                }
+
+                foreach ($fieldLayout->getCustomFields() as $field) {
+                    if (!($field instanceof AssetsField) || $field instanceof PolymediaField) {
+                        continue;
+                    }
+
+                    $providers = $this->getAssetFieldSettings()->getAllowedProviders($field->uid);
+
+                    if (empty($providers)) {
+                        continue;
+                    }
+
+                    $this->getProviderFilter()->validate($element, $field->handle, $providers);
+                }
             },
         );
     }
