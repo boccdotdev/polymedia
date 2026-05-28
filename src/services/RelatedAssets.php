@@ -98,16 +98,9 @@ class RelatedAssets extends Component
      */
     public function resolveTracks(int $itemId, string $role, ?int $siteId = null): array
     {
-        $conditions = ['itemId' => $itemId, 'role' => $role];
-
-        if ($siteId !== null) {
-            $conditions['siteId'] = $siteId;
-        }
-
-        $records = RelatedAssetRecord::findAll($conditions);
         $assets = [];
 
-        foreach ($records as $record) {
+        foreach ($this->getTrackRecords($itemId, $role, $siteId) as $record) {
             $asset = Craft::$app->getAssets()->getAssetById($record->assetId);
 
             if ($asset) {
@@ -116,6 +109,28 @@ class RelatedAssets extends Component
         }
 
         return $assets;
+    }
+
+    /**
+     * Returns the raw track records for a media item, filtered by role and site.
+     *
+     * @param int $itemId the media item record ID
+     * @param string $role `captions`, `subtitles`, or `descriptions`
+     * @param ?int $siteId optional site ID filter; null = all sites
+     * @return RelatedAssetRecord[]
+     *
+     * @author boccdotdev
+     * @since 1.2.0
+     */
+    public function getTrackRecords(int $itemId, string $role, ?int $siteId = null): array
+    {
+        $conditions = ['itemId' => $itemId, 'role' => $role];
+
+        if ($siteId !== null) {
+            $conditions['siteId'] = $siteId;
+        }
+
+        return RelatedAssetRecord::findAll($conditions);
     }
 
     /**
@@ -209,6 +224,38 @@ class RelatedAssets extends Component
     public function detach(int $recordId): bool
     {
         return RelatedAssetRecord::deleteAll(['id' => $recordId]) > 0;
+    }
+
+    /**
+     * Detaches multiple related asset records in a single query.
+     *
+     * @param int[] $recordIds the related asset record IDs
+     * @return int the number of records deleted
+     *
+     * @author boccdotdev
+     * @since 1.2.0
+     */
+    public function detachMany(array $recordIds): int
+    {
+        if (!$recordIds) {
+            return 0;
+        }
+
+        return RelatedAssetRecord::deleteAll(['id' => $recordIds]);
+    }
+
+    /**
+     * Removes the poster attachment from a media item, if any.
+     *
+     * @param int $itemId the media item record ID
+     * @return int the number of records deleted
+     *
+     * @author boccdotdev
+     * @since 1.2.0
+     */
+    public function clearPoster(int $itemId): int
+    {
+        return RelatedAssetRecord::deleteAll(['itemId' => $itemId, 'role' => 'poster']);
     }
 
     /**

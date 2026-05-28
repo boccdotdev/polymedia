@@ -32,9 +32,29 @@ Field settings:
 
 ## Adding Media
 
-Click **Add media URL** in the asset index toolbar. Paste any supported URL, give it a title, and choose a target volume. The plugin auto-detects the provider type and creates a `.pmedia` manifest asset.
+Click **Add media URL**, paste any supported URL, and give it a title. The plugin auto-detects the provider type and creates a `.pmedia` manifest asset. The button is available in two places:
+
+- **Assets index** — sits beside **Upload files**. The manifest lands in the volume/folder you're currently browsing, exactly like an uploaded file.
+- **Field selection modals** — when picking media for a Polymedia or Assets field. The manifest lands in the field's upload location.
+
+No volume picker — the target follows your current location, falling back to the configured default volume (then the first volume you can write to) if none can be resolved.
 
 For providers that can't be auto-detected (Shaka, Video.js, PeerTube), use the "Force Type" dropdown.
+
+You can also set a poster image right on the **Add media URL** screen — image-only, with inline upload landing in the new item's folder. Posters and tracks can still be managed later on the asset edit screen.
+
+### Per-item folders
+
+Each `.pmedia` is created inside its own folder (named after the title slug plus a short uid), keeping its poster and track files together and the parent volume tidy. Hard-deleting the item removes the folder and everything in it.
+
+To reorganise items created before this behaviour existed, run:
+
+```
+./craft polymedia/migrate/folders --dry-run   # preview
+./craft polymedia/migrate/folders             # apply
+```
+
+Items already in their own folder are skipped, so it's safe to re-run.
 
 ## Front-End Setup
 
@@ -240,7 +260,9 @@ For audio types, the poster is emitted as `<img slot="poster" class="polymedia-c
 
 ## Accessibility
 
-Attach `.vtt` caption files via the asset edit screen. Captions are site-scoped — attach different language tracks to different Craft sites.
+Attach `.vtt` files to video items via the asset edit screen, in three roles: **Captions**, **Subtitles**, and **Descriptions**. Each role is a multi-select picker that can also upload straight into the item's folder. The pickers appear only on video items (audio items show the poster picker alone).
+
+Tracks are site-scoped — attach different language files to different Craft sites. On save, each track's `srclang` and `label` are derived from the current site (primary language subtag and locale display name).
 
 Tracks auto-emit as `<track>` elements inside the player. `crossorigin="anonymous"` is set automatically when VTT files are on a different domain.
 
@@ -249,6 +271,28 @@ Tracks auto-emit as `<track>` elements inside the player. `crossorigin="anonymou
 The plugin warns when saving a URL that appears to contain a signed token (e.g. Mux signed playback, S3 presigned URLs) into a publicly accessible volume. The manifest file is readable by anyone with volume access — signed tokens in public manifests may leak.
 
 Disable the warning in plugin settings if your setup handles access control at the filesystem level.
+
+## Troubleshooting
+
+### YouTube playback error 153
+
+YouTube refuses embedded playback (error code 153) when the embed request reaches `youtube.com` with no `Referer` header. The `<youtube-video>` element builds its `<iframe>` inside a shadow root, so this can't be fixed from your template — it's governed by your site's **referrer policy**, not the plugin.
+
+Browsers default to `strict-origin-when-cross-origin`, which works. Error 153 means something on your site has overridden it to a stricter value such as `no-referrer` or `same-origin`, stripping the referrer to YouTube.
+
+Fix it at the document level. Either send the header:
+
+```
+Referrer-Policy: strict-origin-when-cross-origin
+```
+
+…or add a meta tag to your page `<head>`:
+
+```html
+<meta name="referrer" content="strict-origin-when-cross-origin">
+```
+
+If you intentionally enforce a strict global policy, scope the relaxation to pages that embed YouTube rather than site-wide.
 
 ## Supported Providers
 

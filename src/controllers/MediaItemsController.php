@@ -12,8 +12,11 @@
 namespace boccdotdev\polymedia\controllers;
 
 use boccdotdev\polymedia\Plugin;
+use boccdotdev\polymedia\models\Settings;
 use Craft;
-use craft\helpers\Json;
+use craft\elements\Asset;
+use craft\elements\User;
+use craft\models\VolumeFolder;
 use craft\web\Controller;
 use yii\web\Response;
 
@@ -56,54 +59,17 @@ class MediaItemsController extends Controller
         $settings = $plugin->getSettings();
         $providerTypes = $plugin->getUrlDetector()->getProviderTypes();
 
-        $volumes = Craft::$app->getVolumes()->getAllVolumes();
-        $volumeOptions = [];
-        $folderOptions = [];
-
         $currentUser = Craft::$app->getUser()->getIdentity();
-
-        foreach ($volumes as $volume) {
-            if (!$currentUser || !$currentUser->can("saveAssets:$volume->uid")) {
-                continue;
-            }
-
-            $volumeOptions[] = [
-                'label' => $volume->name,
-                'value' => $volume->id,
-            ];
-
-            $rootFolder = Craft::$app->getAssets()->getRootFolderByVolumeId($volume->id);
-
-            if ($rootFolder) {
-                $folderOptions[$volume->id] = $rootFolder->id;
-            }
-        }
-
-        $defaultVolumeId = null;
-
-        if ($settings->defaultVolumeUid) {
-            $defaultVolume = Craft::$app->getVolumes()->getVolumeByUid($settings->defaultVolumeUid);
-
-            if ($defaultVolume) {
-                $defaultVolumeId = $defaultVolume->id;
-            }
-        }
-
-        if (!$defaultVolumeId && !empty($volumeOptions)) {
-            $defaultVolumeId = $volumeOptions[0]['value'];
-        }
-
-        $defaultFolderId = $defaultVolumeId ? ($folderOptions[$defaultVolumeId] ?? '') : '';
+        $folderId = (int)Craft::$app->getRequest()->getParam('folderId') ?: null;
+        $folder = $this->_resolveFolder($folderId, $currentUser, $settings);
 
         return $this->asCpScreen()
             ->title(Craft::t('polymedia', 'Add media URL'))
             ->contentTemplate('polymedia/_cp/create-screen', [
                 'providerTypes' => $providerTypes,
-                'volumeOptions' => $volumeOptions,
-                'folderOptionsJson' => Json::encode($folderOptions),
-                'defaultVolumeId' => $defaultVolumeId,
-                'defaultFolderId' => $defaultFolderId,
+                'folderId' => $folder?->id ?? '',
                 'warnOnSignedUrl' => $settings->warnOnSignedUrlInPublicVolume,
+                'posterFieldConfig' => $plugin->getPosterFieldConfig($folder),
             ])
             ->action('polymedia/media-items/create')
             ->submitButtonLabel(Craft::t('polymedia', 'Save'));
@@ -130,33 +96,21 @@ class MediaItemsController extends Controller
         $url = trim($request->getRequiredBodyParam('url'));
         $title = trim($request->getRequiredBodyParam('title'));
         $typeOverride = $request->getBodyParam('typeOverride') ?: null;
-        $volumeId = $request->getRequiredBodyParam('volumeId');
-        $folderId = $request->getBodyParam('folderId', '');
+        $folderId = (int)$request->getBodyParam('folderId') ?: null;
         $confirmedSignedUrlWarning = (bool)$request->getBodyParam('confirmedSignedUrlWarning', false);
 
         if ($url === '' || $title === '') {
             return $this->asFailure(Craft::t('polymedia', 'URL and title are required.'));
         }
 
-        if ((int)$folderId === 0) {
-            $rootFolder = Craft::$app->getAssets()->getRootFolderByVolumeId((int)$volumeId);
-
-            if ($rootFolder) {
-                $folderId = $rootFolder->id;
-            }
-        }
-
-        $volume = Craft::$app->getVolumes()->getVolumeById((int)$volumeId);
-
-        if (!$volume) {
-            return $this->asFailure(Craft::t('polymedia', 'Invalid volume.'));
-        }
-
         $currentUser = Craft::$app->getUser()->getIdentity();
+        $folder = $this->_resolveFolder($folderId, $currentUser, $settings);
 
-        if (!$currentUser || !$currentUser->can("saveAssets:$volume->uid")) {
+        if (!$folder) {
             return $this->asFailure(Craft::t('polymedia', 'You do not have permission to save assets in this volume.'));
         }
+
+        $volume = $folder->getVolume();
 
         $detection = $plugin->getUrlDetector()->detect($url, $typeOverride);
 
@@ -179,12 +133,23 @@ class MediaItemsController extends Controller
         $derivedThumbnail = $plugin->getThumbnailDeriver()->derive($detection);
 
         $asset = $plugin->getManifestWriter()->create(
-            volumeId: (int)$volumeId,
-            folderId: (int)$folderId,
+            volumeId: (int)$folder->volumeId,
+            folderId: (int)$folder->id,
             detection: $detection,
             title: $title,
             derivedThumbnail: $derivedThumbnail,
         );
+
+        $posterIds = $request->getBodyParam('polymediaPoster');
+
+        if ($posterIds !== null && $posterIds !== '' && $posterIds !== []) {
+            $record = $plugin->getMediaItems()->getByAssetId($asset->id);
+
+            if ($record) {
+                $plugin->savePoster($record, $posterIds);
+                $this->_coLocatePoster($posterIds, (int)$folder->id, $asset);
+            }
+        }
 
         return $this->asSuccess(
             Craft::t('polymedia', 'Media item created.'),
@@ -197,6 +162,101 @@ class MediaItemsController extends Controller
 
     // Private Methods
     // =========================================================================
+
+    /**
+     * Moves a poster uploaded on the create screen into the new item's folder.
+     *
+     * Inline uploads land in the folder the user was browsing; this co-locates
+     * them with the `.pmedia` so each item's files stay together. A poster that
+     * already lives elsewhere (a pre-existing asset the user selected) is left
+     * where it is, since it may be shared.
+     *
+     * @param mixed $posterIds the submitted poster value
+     * @param int $parentFolderId the folder the user was browsing
+     * @param Asset $asset the newly created `.pmedia` asset
+     */
+    private function _coLocatePoster(mixed $posterIds, int $parentFolderId, Asset $asset): void
+    {
+        $posterAssetId = is_array($posterIds) ? (int)($posterIds[0] ?? 0) : (int)$posterIds;
+
+        if (!$posterAssetId) {
+            return;
+        }
+
+        $assets = Craft::$app->getAssets();
+        $poster = $assets->getAssetById($posterAssetId);
+
+        if (!$poster || $poster->folderId !== $parentFolderId) {
+            return;
+        }
+
+        $itemFolder = $asset->getFolder();
+
+        if ($itemFolder) {
+            $assets->moveAsset($poster, $itemFolder);
+        }
+    }
+
+    /**
+     * Resolves the target folder for a new `.pmedia` asset.
+     *
+     * Prefers the folder the user is currently viewing (passed from the asset
+     * index), then the configured default volume, then the first volume the
+     * user can save to. Only returns a folder the user has permission to use.
+     *
+     * @param int|null $folderId the current source folder, if any
+     * @param User|null $user the current user
+     * @param Settings $settings the plugin settings
+     * @return VolumeFolder|null
+     */
+    private function _resolveFolder(?int $folderId, ?User $user, Settings $settings): ?VolumeFolder
+    {
+        $assets = Craft::$app->getAssets();
+
+        if ($folderId) {
+            $folder = $assets->getFolderById($folderId);
+
+            if ($folder && $this->_canSave($folder, $user)) {
+                return $folder;
+            }
+        }
+
+        if ($settings->defaultVolumeUid) {
+            $volume = Craft::$app->getVolumes()->getVolumeByUid($settings->defaultVolumeUid);
+
+            if ($volume) {
+                $folder = $assets->getRootFolderByVolumeId($volume->id);
+
+                if ($folder && $this->_canSave($folder, $user)) {
+                    return $folder;
+                }
+            }
+        }
+
+        foreach (Craft::$app->getVolumes()->getAllVolumes() as $volume) {
+            if ($user && $user->can("saveAssets:$volume->uid")) {
+                return $assets->getRootFolderByVolumeId($volume->id);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Checks whether the user can save assets in the given folder's volume.
+     *
+     * @param VolumeFolder $folder the target folder
+     * @param User|null $user the current user
+     * @return bool
+     */
+    private function _canSave(VolumeFolder $folder, ?User $user): bool
+    {
+        if (!$user || !$folder->volumeId) {
+            return false;
+        }
+
+        return $user->can("saveAssets:{$folder->getVolume()->uid}");
+    }
 
     /**
      * Checks whether a URL contains signed-URL query parameters.

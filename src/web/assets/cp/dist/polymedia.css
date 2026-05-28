@@ -1,3 +1,4 @@
-.polymedia-add-btn {
-    margin-left: 7px;
+#action-buttons .polymedia-add-btn + .btn,
+.toolbar .polymedia-add-btn {
+    margin-inline-start: 7px;
 }

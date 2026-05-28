@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.2.0 - 2026-05-29
+
+### Added
+- Track pickers on the asset edit screen for video items — **Captions**, **Subtitles**, and **Descriptions**. Each is a multi-select `.vtt` picker that can also upload into the item's folder. Tracks are site-scoped, with `srclang` and `label` derived from the current site on save. Previously tracks could only be attached programmatically via `RelatedAssets::attach()`.
+- Poster image picker on the **Add media URL** create screen, so a poster can be set when first creating an item — previously only available on the asset edit screen. The picker is image-only and supports inline upload, with uploads landing in the item's own folder.
+- **Add media URL** button on the standalone Assets index toolbar, beside **Upload files**. Previously only available in field selection modals.
+- Each new `.pmedia` is now created inside its own dedicated folder (named after the title slug plus a short uid), so its poster and track files sit alongside it instead of cluttering the parent folder. Posters and tracks uploaded inline are co-located into that folder automatically.
+- `polymedia/migrate/folders` console command to move existing `.pmedia` items (and their co-located poster/track files) into per-item folders. Supports `--dry-run`; safe to run repeatedly — items already in their own folder are skipped.
+
+### Changed
+- Removed the target-volume dropdown from the **Add media URL** screen. New `.pmedia` manifests now land in the volume/folder the user is currently browsing (or the field's upload location), matching how Craft handles normal asset uploads. Falls back to the configured default volume, then the first writable volume.
+- Hard-deleting a `.pmedia` now also removes its dedicated folder and the poster/track files inside it. A `.pmedia` that shares a folder with other items leaves the folder untouched.
+
 ## 1.1.0 - 2026-05-07
 
 ### Added

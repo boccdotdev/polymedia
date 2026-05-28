@@ -28,20 +28,13 @@
     ),
 }) }}
 
-{{ forms.selectField({
-    label: 'Volume'|t('polymedia'),
-    id: 'volumeId',
-    name: 'volumeId',
-    options: volumeOptions,
-    value: defaultVolumeId,
-    required: true,
-}) }}
-
 {{ forms.hidden({
     id: 'folderId',
     name: 'folderId',
-    value: defaultFolderId,
+    value: folderId,
 }) }}
+
+{{ forms.elementSelectField(posterFieldConfig) }}
 
 {% if warnOnSignedUrl %}
     <div id="polymedia-signed-url-warning" class="readable" style="display: none;">
@@ -57,18 +50,9 @@
     </div>
 {% endif %}
 
+{% if warnOnSignedUrl %}
 {% js %}
 (function() {
-    var folderOptions = {{ folderOptionsJson|raw }};
-    var $volumeSelect = $('#{{ 'volumeId'|namespaceInputId }}');
-    var $folderInput = $('#{{ 'folderId'|namespaceInputId }}');
-
-    $volumeSelect.on('change', function() {
-        var volumeId = $(this).val();
-        $folderInput.val(folderOptions[volumeId] || '');
-    });
-
-    {% if warnOnSignedUrl %}
     var signedPatterns = [
         /[?&](token|sig|signature|Policy|Signature|KeyPair-Id|Key-Pair-Id)=/i,
         /[?&]token=eyJ/
@@ -81,6 +65,6 @@
         var isSigned = signedPatterns.some(function(p) { return p.test(url); });
         $warning.toggle(isSigned);
     });
-    {% endif %}
 })();
 {% endjs %}
+{% endif %}

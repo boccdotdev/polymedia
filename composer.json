@@ -45,6 +45,7 @@
         "name": "Polymedia",
         "handle": "polymedia",
         "developer": "boccdotdev",
+        "developerUrl": "https://bocc.dev",
         "documentationUrl": "https://github.com/boccdotdev/polymedia",
         "class": "boccdotdev\\polymedia\\Plugin"
     },
