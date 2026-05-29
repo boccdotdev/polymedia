@@ -11,6 +11,7 @@
 
 namespace boccdotdev\polymedia\services;
 
+use Craft;
 use boccdotdev\polymedia\records\FieldSettingsRecord;
 use craft\helpers\Json;
 use yii\base\Component;
@@ -52,6 +53,14 @@ class AssetFieldSettings extends Component
     {
         if (array_key_exists($fieldUid, $this->_cache)) {
             return $this->_cache[$fieldUid];
+        }
+
+        // Guard the migration window: an element may validate before this
+        // plugin's table-creating migration has run (e.g. a core migration
+        // re-saves sections during `craft up`). Don't cache — the table may
+        // exist on a later call within the same request.
+        if (!Craft::$app->getDb()->tableExists(FieldSettingsRecord::tableName())) {
+            return [];
         }
 
         $record = FieldSettingsRecord::findOne(['fieldUid' => $fieldUid]);

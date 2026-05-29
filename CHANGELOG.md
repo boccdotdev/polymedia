@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.1 - 2026-05-29
+
+### Fixed
+- `craft up` could fail when a core or third-party migration re-saved sections before this plugin's `m260507_000000_field_settings` migration had run. The element-validation hook queried the not-yet-created `polymedia_field_settings` table and threw `The table does not exist`. `AssetFieldSettings::getAllowedProviders()` now returns no restrictions when the table is absent, so migrations complete cleanly.
+
 ## 1.2.0 - 2026-05-29
 
 ### Added
