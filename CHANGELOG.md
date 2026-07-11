@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.0.0 - 2026-07-11
 
 ### Added
 - **Lite / Pro editions.** Lite remains free URL media (including Mux paste). Pro gates Mux credentials UI, library browse, and direct upload.
@@ -24,6 +24,7 @@
 - Mux thumbnail URLs use first frame (`?time=0`) instead of Mux’s mid-video default.
 - `autoFetchPoster` is implemented and re-enabled in settings (URL create path downloads a poster when none is supplied).
 - Mux library imports always attempt a first-frame poster when the item has no poster.
+- License changed from MIT to the [Craft License](https://craftcms.github.io/license/) (`proprietary`) with the introduction of the commercial Pro edition. Lite remains free to install from the Plugin Store.
 
 ## 1.3.0 - 2026-07-11
 

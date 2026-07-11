@@ -384,4 +384,4 @@ Built on [Media Chrome](https://www.media-chrome.org/) and the [media-elements](
 
 ## License
 
-MIT
+[Craft License](https://craftcms.github.io/license/). Lite is free to install from the Plugin Store; Pro is a paid edition.

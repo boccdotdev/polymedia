@@ -2,7 +2,7 @@
     "name": "boccdotdev/polymedia",
     "description": "Universal media field for Craft CMS. Media URLs as native assets, with optional front-end rendering via Media Chrome.",
     "type": "craft-plugin",
-    "license": "MIT",
+    "license": "proprietary",
     "keywords": [
         "craft",
         "craft-plugin",
