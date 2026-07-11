@@ -23,6 +23,7 @@ use boccdotdev\polymedia\services\EditorContent;
 use boccdotdev\polymedia\services\ManifestWriter;
 use boccdotdev\polymedia\services\MediaItems;
 use boccdotdev\polymedia\services\Mux;
+use boccdotdev\polymedia\services\PosterFetcher;
 use boccdotdev\polymedia\services\ProviderFilter;
 use boccdotdev\polymedia\services\RelatedAssets;
 use boccdotdev\polymedia\services\Renderer;
@@ -36,6 +37,7 @@ use craft\base\Model;
 use craft\base\Plugin as BasePlugin;
 use craft\controllers\ElementsController;
 use craft\elements\Asset;
+use craft\events\DefineAssetThumbUrlEvent;
 use craft\events\DefineAttributeHtmlEvent;
 use craft\events\DefineBehaviorsEvent;
 use craft\events\DefineElementEditorHtmlEvent;
@@ -52,6 +54,7 @@ use craft\helpers\Cp;
 use craft\helpers\Html;
 use craft\helpers\Json;
 use craft\models\VolumeFolder;
+use craft\services\Assets as AssetsService;
 use craft\services\Fields;
 use craft\web\twig\variables\CraftVariable;
 use craft\web\View;
@@ -71,6 +74,7 @@ use yii\base\Event;
  * @property-read ProviderFilter $providerFilter
  * @property-read EditorContent $editorContent
  * @property-read Mux $mux
+ * @property-read PosterFetcher $posterFetcher
  *
  * @author boccdotdev
  * @since 1.0.0
@@ -146,11 +150,13 @@ class Plugin extends BasePlugin
             'providerFilter' => ProviderFilter::class,
             'editorContent' => EditorContent::class,
             'mux' => Mux::class,
+            'posterFetcher' => PosterFetcher::class,
         ]);
 
         $this->_registerFileKind();
         $this->_registerAssetDeleteHandler();
         $this->_registerAssetIndexAttributes();
+        $this->_registerAssetThumbUrl();
         $this->_registerAssetReconciler();
         $this->_registerEditorContent();
         $this->_registerFieldType();
@@ -318,6 +324,19 @@ class Plugin extends BasePlugin
     public function getMux(): Mux
     {
         return $this->get('mux');
+    }
+
+    /**
+     * Returns the poster fetcher service.
+     *
+     * @return PosterFetcher
+     *
+     * @author boccdotdev
+     * @since 2.0.0
+     */
+    public function getPosterFetcher(): PosterFetcher
+    {
+        return $this->get('posterFetcher');
     }
 
     // Protected Methods
@@ -908,6 +927,20 @@ class Plugin extends BasePlugin
                     'Media item created.',
                     'Browse Mux library',
                     'Upload to Mux',
+                    'Import',
+                    'In Craft',
+                    'Loading Mux library…',
+                    'No Mux assets found.',
+                    'Could not load Mux library.',
+                    'Mux media imported.',
+                    'Already in Craft — using existing media item.',
+                    'Previous',
+                    'Next',
+                    'Close',
+                    'Signed',
+                    'Processing',
+                    'Ready',
+                    'Errored',
                 ]);
                 $view->registerJs(
                     'window.CraftPolymediaConfig = ' . Json::encode([
@@ -916,6 +949,58 @@ class Plugin extends BasePlugin
                     ]) . ';',
                     View::POS_HEAD,
                 );
+            },
+        );
+    }
+
+    /**
+     * Serves related poster (or remote thumbnail) as the CP thumb for `.pmedia` assets.
+     *
+     * Folder listing still uses Craft’s folder icon; posters are co-located in the
+     * dedicated item folder so volume browsers show a real image among contents.
+     */
+    private function _registerAssetThumbUrl(): void
+    {
+        Event::on(
+            AssetsService::class,
+            AssetsService::EVENT_DEFINE_THUMB_URL,
+            function(DefineAssetThumbUrlEvent $event) {
+                /** @var Asset $asset */
+                $asset = $event->asset;
+
+                if ($asset->kind !== 'polymedia') {
+                    return;
+                }
+
+                $record = $this->getMediaItems()->getByAssetId((int)$asset->id);
+
+                if (!$record) {
+                    return;
+                }
+
+                $poster = $this->getRelatedAssets()->getPoster((int)$record->id);
+
+                if ($poster) {
+                    $url = Craft::$app->getAssets()->getThumbUrl(
+                        $poster,
+                        $event->width,
+                        $event->height,
+                        false,
+                    );
+
+                    if ($url) {
+                        $event->url = $url;
+
+                        return;
+                    }
+                }
+
+                // Fall back to remote thumbnail in metadata / deriver until local poster exists.
+                $remote = $this->getPosterFetcher()->deriveRemoteUrl($record);
+
+                if ($remote) {
+                    $event->url = $remote;
+                }
             },
         );
     }

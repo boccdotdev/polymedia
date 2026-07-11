@@ -108,8 +108,17 @@
     disabled: not allowAdminChanges,
 }) }}
 
+{{ forms.lightswitchField({
+    label: 'Auto-Fetch Poster'|t('polymedia'),
+    instructions: 'When adding a media URL without a custom poster, download a provider thumbnail (Mux first frame, YouTube/Vimeo stills, etc.) into the item folder. Mux library imports always fetch a poster when none is set.'|t('polymedia'),
+    id: 'autoFetchPoster',
+    name: 'autoFetchPoster',
+    on: settings.autoFetchPoster,
+    disabled: not allowAdminChanges,
+}) }}
+
 {# Dead settings (kept on Settings model for project config BC; UI removed 1.2.2):
-   autoFetchPoster, requireCaptionsForVideo, defaultCaptionLanguageFromSite, restrictAssetKinds #}
+   requireCaptionsForVideo, defaultCaptionLanguageFromSite, restrictAssetKinds #}
 
 <hr>
 

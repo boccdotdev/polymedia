@@ -6,8 +6,17 @@
 - **Lite / Pro editions.** Lite remains free URL media (including Mux paste). Pro gates Mux credentials UI, library browse, and direct upload.
 - Mux settings: Token ID, Token Secret (env-overridable), and optional “delete from Mux on Craft hard-delete” (default off).
 - `Mux` service wrapping `muxinc/mux-php` (`isConfigured`, list/get assets, direct upload, delete, first-frame thumbnail URL).
-- `MuxController` skeleton with Pro + credentials gates (`library`, `import`, `create-upload`, `upload-status`, `complete-upload`).
-- CP config flag `Craft.Polymedia.muxEnabled` (Pro + credentials) for upcoming browse/upload buttons.
+- **Browse Mux library** CP modal (Pro + credentials): live Mux Assets API grid, “In Craft” badge, import/reuse by playback ID.
+- `PosterFetcher` downloads provider stills into the item folder and attaches as poster; user-selected posters win.
+- `FetchMuxPoster` queue job retries Mux first-frame downloads while assets are still processing.
+- CP asset thumbs for `.pmedia` files use the related poster (or remote thumbnail fallback).
+- `MediaItems::getByTypeAndProviderId()` / `getByTypeAndProviderIds()` for import reuse.
+- CP config flag `Craft.Polymedia.muxEnabled` (Pro + credentials).
+
+### Changed
+- Mux thumbnail URLs use first frame (`?time=0`) instead of Mux’s mid-video default.
+- `autoFetchPoster` is implemented and re-enabled in settings (URL create path downloads a poster when none is supplied).
+- Mux library imports always attempt a first-frame poster when the item has no poster.
 
 ## 1.3.0 - 2026-07-11
 

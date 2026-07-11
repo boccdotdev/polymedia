@@ -57,6 +57,30 @@ class MediaItems extends Component
     }
 
     /**
+     * Returns the media item record by primary key.
+     *
+     * @param int $id the media item record ID
+     * @return ?MediaItemRecord
+     *
+     * @author boccdotdev
+     * @since 2.0.0
+     */
+    public function getById(int $id): ?MediaItemRecord
+    {
+        if ($id <= 0) {
+            return null;
+        }
+
+        $record = MediaItemRecord::findOne(['id' => $id]);
+
+        if ($record) {
+            $this->_byAssetId[(int)$record->assetId] = $record;
+        }
+
+        return $record;
+    }
+
+    /**
      * Returns the media item record for a given asset UID.
      *
      * @param string $assetUid the asset UID
@@ -142,5 +166,69 @@ class MediaItems extends Component
     public function getByType(string $type): array
     {
         return MediaItemRecord::findAll(['type' => $type]);
+    }
+
+    /**
+     * Returns the media item for a provider type + provider id (e.g. mux playback id).
+     *
+     * Used to reuse an existing `.pmedia` when re-importing from the Mux library
+     * or completing an upload that already has a Craft asset.
+     *
+     * @param string $type media type key (`mux`, `youtube`, …)
+     * @param string $providerId provider-specific id (Mux playback ID, etc.)
+     * @return ?MediaItemRecord
+     *
+     * @author boccdotdev
+     * @since 2.0.0
+     */
+    public function getByTypeAndProviderId(string $type, string $providerId): ?MediaItemRecord
+    {
+        if ($type === '' || $providerId === '') {
+            return null;
+        }
+
+        $record = MediaItemRecord::findOne([
+            'type' => $type,
+            'providerId' => $providerId,
+        ]);
+
+        if ($record) {
+            $this->_byAssetId[(int)$record->assetId] = $record;
+        }
+
+        return $record;
+    }
+
+    /**
+     * Returns media item records keyed by providerId for a batch of ids (one type).
+     *
+     * @param string $type media type key
+     * @param string[] $providerIds provider ids to look up
+     * @return array<string, MediaItemRecord> keyed by providerId
+     *
+     * @author boccdotdev
+     * @since 2.0.0
+     */
+    public function getByTypeAndProviderIds(string $type, array $providerIds): array
+    {
+        $providerIds = array_values(array_unique(array_filter($providerIds, static fn($id) => $id !== null && $id !== '')));
+
+        if ($type === '' || $providerIds === []) {
+            return [];
+        }
+
+        /** @var MediaItemRecord[] $records */
+        $records = MediaItemRecord::find()
+            ->where(['type' => $type, 'providerId' => $providerIds])
+            ->all();
+
+        $map = [];
+
+        foreach ($records as $record) {
+            $map[(string)$record->providerId] = $record;
+            $this->_byAssetId[(int)$record->assetId] = $record;
+        }
+
+        return $map;
     }
 }

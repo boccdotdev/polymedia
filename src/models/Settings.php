@@ -72,8 +72,9 @@ class Settings extends Model
     public bool $validateVttOnUpload = true;
 
     /**
-     * @var bool Download derived thumbnail as poster on asset creation.
-     * @deprecated 1.2.2 Unused until implemented (planned with Mux Pro / 2.0); kept for project config BC.
+     * @var bool Download derived thumbnail as poster on URL asset creation when no user poster is set.
+     * Mux library imports always attempt a first-frame poster regardless of this setting.
+     * @since 1.0.0
      */
     public bool $autoFetchPoster = true;
 
