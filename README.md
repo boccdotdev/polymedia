@@ -70,6 +70,8 @@ You can also set a poster image right on the **Add media URL** screen — image-
 
 Optional setting **Delete Mux asset when Craft asset is deleted** (default **off**): when enabled, **hard-deleting** a Mux `.pmedia` also deletes the video in Mux. Soft-delete / trash never calls Mux.
 
+**Notes on delete-from-Mux:** the remote delete runs **synchronously** in the hard-delete request (not a queue job). Deleting many Mux items at once may take longer. If the site is on **Lite** or credentials are missing while this setting is still on, Craft logs a **warning** and skips the Mux API call (the remote asset may remain until deleted in Mux).
+
 ### Per-item folders
 
 Each `.pmedia` is created inside its own folder (named after the title slug plus a short uid), keeping its poster and track files together and the parent volume tidy. Hard-deleting the item removes the folder and everything in it.

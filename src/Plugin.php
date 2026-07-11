@@ -457,8 +457,27 @@ class Plugin extends BasePlugin
             return;
         }
 
-        // Feature is Pro-only; skip silently on Lite even if metadata exists.
-        if (!$this->getIsPro() || !$this->getMux()->isConfigured()) {
+        // Feature is Pro-only. If the install was downgraded to Lite or credentials
+        // were cleared, still warn — the operator enabled the setting and expects
+        // remote cleanup; silent skip leaves orphan Mux assets.
+        if (!$this->getIsPro()) {
+            Craft::warning(
+                "Polymedia: deleteMuxAssetOnDelete is on but Polymedia is not Pro; " .
+                "skipping Mux delete for Craft asset #{$record->assetId}. " .
+                "Restore Pro or delete the asset in the Mux dashboard.",
+                __METHOD__,
+            );
+
+            return;
+        }
+
+        if (!$this->getMux()->isConfigured()) {
+            Craft::warning(
+                "Polymedia: deleteMuxAssetOnDelete is on but Mux is not configured; " .
+                "skipping Mux delete for Craft asset #{$record->assetId}.",
+                __METHOD__,
+            );
+
             return;
         }
 
