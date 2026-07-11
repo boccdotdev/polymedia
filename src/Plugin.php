@@ -22,6 +22,8 @@ use boccdotdev\polymedia\services\AssetFieldSettings;
 use boccdotdev\polymedia\services\EditorContent;
 use boccdotdev\polymedia\services\ManifestWriter;
 use boccdotdev\polymedia\services\MediaItems;
+use boccdotdev\polymedia\services\Mux;
+use boccdotdev\polymedia\services\PosterFetcher;
 use boccdotdev\polymedia\services\ProviderFilter;
 use boccdotdev\polymedia\services\RelatedAssets;
 use boccdotdev\polymedia\services\Renderer;
@@ -35,6 +37,7 @@ use craft\base\Model;
 use craft\base\Plugin as BasePlugin;
 use craft\controllers\ElementsController;
 use craft\elements\Asset;
+use craft\events\DefineAssetThumbUrlEvent;
 use craft\events\DefineAttributeHtmlEvent;
 use craft\events\DefineBehaviorsEvent;
 use craft\events\DefineElementEditorHtmlEvent;
@@ -51,6 +54,7 @@ use craft\helpers\Cp;
 use craft\helpers\Html;
 use craft\helpers\Json;
 use craft\models\VolumeFolder;
+use craft\services\Assets as AssetsService;
 use craft\services\Fields;
 use craft\web\twig\variables\CraftVariable;
 use craft\web\View;
@@ -69,12 +73,27 @@ use yii\base\Event;
  * @property-read AssetFieldSettings $assetFieldSettings
  * @property-read ProviderFilter $providerFilter
  * @property-read EditorContent $editorContent
+ * @property-read Mux $mux
+ * @property-read PosterFetcher $posterFetcher
  *
  * @author boccdotdev
  * @since 1.0.0
  */
 class Plugin extends BasePlugin
 {
+    // Const Properties
+    // =========================================================================
+
+    /**
+     * Free edition: URL media (including Mux paste), field, player.
+     */
+    public const EDITION_LITE = 'lite';
+
+    /**
+     * Commercial edition: Lite + Mux credentials, library browse, direct upload.
+     */
+    public const EDITION_PRO = 'pro';
+
     // Public Properties
     // =========================================================================
 
@@ -99,6 +118,17 @@ class Plugin extends BasePlugin
     /**
      * @inheritdoc
      */
+    public static function editions(): array
+    {
+        return [
+            self::EDITION_LITE,
+            self::EDITION_PRO,
+        ];
+    }
+
+    /**
+     * @inheritdoc
+     */
     public function init(): void
     {
         parent::init();
@@ -119,11 +149,14 @@ class Plugin extends BasePlugin
             'assetFieldSettings' => AssetFieldSettings::class,
             'providerFilter' => ProviderFilter::class,
             'editorContent' => EditorContent::class,
+            'mux' => Mux::class,
+            'posterFetcher' => PosterFetcher::class,
         ]);
 
         $this->_registerFileKind();
         $this->_registerAssetDeleteHandler();
         $this->_registerAssetIndexAttributes();
+        $this->_registerAssetThumbUrl();
         $this->_registerAssetReconciler();
         $this->_registerEditorContent();
         $this->_registerFieldType();
@@ -134,6 +167,33 @@ class Plugin extends BasePlugin
         $this->_registerAssetFieldValidation();
         $this->_registerTwigVariable();
         $this->_registerCpAssets();
+    }
+
+    /**
+     * Returns whether the active edition is Pro (or higher).
+     *
+     * @return bool
+     *
+     * @author boccdotdev
+     * @since 2.0.0
+     */
+    public function getIsPro(): bool
+    {
+        return $this->is(self::EDITION_PRO, '>=');
+    }
+
+    /**
+     * Returns whether Mux library/upload UI and controllers may run:
+     * Pro edition with both credentials configured.
+     *
+     * @return bool
+     *
+     * @author boccdotdev
+     * @since 2.0.0
+     */
+    public function getMuxEnabled(): bool
+    {
+        return $this->getIsPro() && $this->getMux()->isConfigured();
     }
 
     /**
@@ -253,6 +313,32 @@ class Plugin extends BasePlugin
         return $this->get('editorContent');
     }
 
+    /**
+     * Returns the Mux API service.
+     *
+     * @return Mux
+     *
+     * @author boccdotdev
+     * @since 2.0.0
+     */
+    public function getMux(): Mux
+    {
+        return $this->get('mux');
+    }
+
+    /**
+     * Returns the poster fetcher service.
+     *
+     * @return PosterFetcher
+     *
+     * @author boccdotdev
+     * @since 2.0.0
+     */
+    public function getPosterFetcher(): PosterFetcher
+    {
+        return $this->get('posterFetcher');
+    }
+
     // Protected Methods
     // =========================================================================
 
@@ -293,6 +379,8 @@ class Plugin extends BasePlugin
         return Craft::$app->getView()->renderTemplate('polymedia/settings', [
             'settings' => $this->getSettings(),
             'volumeOptions' => $volumeOptions,
+            'isPro' => $this->getIsPro(),
+            'muxConfigured' => $this->getMux()->isConfigured(),
         ]);
     }
 
@@ -318,6 +406,10 @@ class Plugin extends BasePlugin
 
     /**
      * Cleans up media item records when assets are deleted.
+     *
+     * Soft delete leaves records intact for trash restore. Hard delete removes
+     * the item record and dedicated folder, and optionally deletes the remote
+     * Mux asset when {@see Settings::$deleteMuxAssetOnDelete} is enabled.
      */
     private function _registerAssetDeleteHandler(): void
     {
@@ -338,10 +430,81 @@ class Plugin extends BasePlugin
                     return;
                 }
 
-                $this->getMediaItems()->deleteByAssetId($asset->id);
+                $record = $this->getMediaItems()->getByAssetId((int)$asset->id);
+                $this->_maybeDeleteMuxAsset($record);
+                $this->getMediaItems()->deleteByAssetId((int)$asset->id);
                 $this->_deleteItemFolderIfDedicated($asset);
             },
         );
+    }
+
+    /**
+     * Deletes the remote Mux asset when the setting is on and metadata has an id.
+     *
+     * Failures are logged and do not block local Craft cleanup.
+     *
+     * @param ?MediaItemRecord $record
+     */
+    private function _maybeDeleteMuxAsset(?MediaItemRecord $record): void
+    {
+        if (!$record || $record->type !== 'mux') {
+            return;
+        }
+
+        $settings = $this->getSettings();
+
+        if (!$settings->deleteMuxAssetOnDelete) {
+            return;
+        }
+
+        // Feature is Pro-only. If the install was downgraded to Lite or credentials
+        // were cleared, still warn — the operator enabled the setting and expects
+        // remote cleanup; silent skip leaves orphan Mux assets.
+        if (!$this->getIsPro()) {
+            Craft::warning(
+                "Polymedia: deleteMuxAssetOnDelete is on but Polymedia is not Pro; " .
+                "skipping Mux delete for Craft asset #{$record->assetId}. " .
+                "Restore Pro or delete the asset in the Mux dashboard.",
+                __METHOD__,
+            );
+
+            return;
+        }
+
+        if (!$this->getMux()->isConfigured()) {
+            Craft::warning(
+                "Polymedia: deleteMuxAssetOnDelete is on but Mux is not configured; " .
+                "skipping Mux delete for Craft asset #{$record->assetId}.",
+                __METHOD__,
+            );
+
+            return;
+        }
+
+        $metadata = $this->getMediaItems()->getMetadata($record);
+        $muxAssetId = isset($metadata['muxAssetId']) ? (string)$metadata['muxAssetId'] : '';
+
+        if ($muxAssetId === '') {
+            Craft::warning(
+                "Polymedia: deleteMuxAssetOnDelete is on but asset #{$record->assetId} has no muxAssetId in metadata.",
+                __METHOD__,
+            );
+
+            return;
+        }
+
+        try {
+            $this->getMux()->deleteAsset($muxAssetId);
+            Craft::info(
+                "Polymedia: deleted Mux asset {$muxAssetId} after hard-delete of Craft asset #{$record->assetId}.",
+                __METHOD__,
+            );
+        } catch (\Throwable $e) {
+            Craft::error(
+                "Polymedia: failed to delete Mux asset {$muxAssetId}: {$e->getMessage()}",
+                __METHOD__,
+            );
+        }
     }
 
     /**
@@ -442,7 +605,7 @@ class Plugin extends BasePlugin
      * Reconciles orphaned `.pmedia` assets that have no `MediaItemRecord` row.
      *
      * Covers assets created by the asset indexer or manual file upload outside
-     * the plugin's "Add media URL" flow.
+     * the plugin's “Add media → From URL” flow.
      */
     private function _registerAssetReconciler(): void
     {
@@ -820,7 +983,7 @@ class Plugin extends BasePlugin
     }
 
     /**
-     * Registers the CP asset bundle on CP requests.
+     * Registers the CP asset bundle on CP requests and passes Mux feature flags.
      */
     private function _registerCpAssets(): void
     {
@@ -835,9 +998,102 @@ class Plugin extends BasePlugin
                 $view = Craft::$app->getView();
                 $view->registerAssetBundle(PolymediaAsset::class);
                 $view->registerTranslations('polymedia', [
+                    'Add media',
+                    'From URL',
+                    'Paste a YouTube, Vimeo, Mux, HLS, or other media URL',
+                    'Browse Mux library',
+                    'Import a video already in your Mux account',
+                    'Upload to Mux',
+                    'Upload a video file directly to Mux',
                     'Add media URL',
                     'Media item created.',
+                    'Import',
+                    'In Craft',
+                    'Loading Mux library…',
+                    'No Mux assets found.',
+                    'Could not load Mux library.',
+                    'Mux media imported.',
+                    'Already in Craft — using existing media item.',
+                    'Previous',
+                    'Next',
+                    'Close',
+                    'Signed',
+                    'Processing',
+                    'Ready',
+                    'Errored',
+                    'Title',
+                    'Video file',
+                    'No file chosen',
+                    'Start upload',
+                    'Uploading…',
+                    'Processing on Mux…',
+                    'Creating media item…',
+                    'Mux upload complete.',
+                    'Upload failed.',
+                    'Upload cancelled.',
+                    'Choose a video file.',
+                    'Poster will be generated from the first frame when ready.',
+                    'Cancel',
                 ]);
+                $view->registerJs(
+                    'window.CraftPolymediaConfig = ' . Json::encode([
+                        'muxEnabled' => $this->getMuxEnabled(),
+                        'isPro' => $this->getIsPro(),
+                    ]) . ';',
+                    View::POS_HEAD,
+                );
+            },
+        );
+    }
+
+    /**
+     * Serves related poster (or remote thumbnail) as the CP thumb for `.pmedia` assets.
+     *
+     * Folder listing still uses Craft’s folder icon; posters are co-located in the
+     * dedicated item folder so volume browsers show a real image among contents.
+     */
+    private function _registerAssetThumbUrl(): void
+    {
+        Event::on(
+            AssetsService::class,
+            AssetsService::EVENT_DEFINE_THUMB_URL,
+            function(DefineAssetThumbUrlEvent $event) {
+                /** @var Asset $asset */
+                $asset = $event->asset;
+
+                if ($asset->kind !== 'polymedia') {
+                    return;
+                }
+
+                $record = $this->getMediaItems()->getByAssetId((int)$asset->id);
+
+                if (!$record) {
+                    return;
+                }
+
+                $poster = $this->getRelatedAssets()->getPoster((int)$record->id);
+
+                if ($poster) {
+                    $url = Craft::$app->getAssets()->getThumbUrl(
+                        $poster,
+                        $event->width,
+                        $event->height,
+                        false,
+                    );
+
+                    if ($url) {
+                        $event->url = $url;
+
+                        return;
+                    }
+                }
+
+                // Fall back to remote thumbnail in metadata / deriver until local poster exists.
+                $remote = $this->getPosterFetcher()->deriveRemoteUrl($record);
+
+                if ($remote) {
+                    $event->url = $remote;
+                }
             },
         );
     }

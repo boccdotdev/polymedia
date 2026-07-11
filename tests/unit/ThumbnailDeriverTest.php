@@ -40,7 +40,10 @@ class ThumbnailDeriverTest extends TestCase
     public function testMux(): void
     {
         $detection = $this->_makeDetection('mux', 'abc123');
-        $this->assertSame('https://image.mux.com/abc123/thumbnail.jpg', $this->_deriver->derive($detection));
+        $this->assertSame(
+            'https://image.mux.com/abc123/thumbnail.jpg?time=0',
+            $this->_deriver->derive($detection),
+        );
     }
 
     public function testYouTube(): void

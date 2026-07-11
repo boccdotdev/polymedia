@@ -95,6 +95,10 @@ class EditorContent extends Component
             ]);
         }
 
+        if ($record->type === 'mux') {
+            $html .= $this->_renderMuxStatus($record);
+        }
+
         if ($record->duration) {
             $html .= Html::beginTag('div', ['class' => 'data', 'style' => 'margin-bottom: 14px;']);
             $html .= Html::tag('div', Craft::t('polymedia', 'Duration') . ': '
@@ -136,6 +140,44 @@ class EditorContent extends Component
     public function supportsTracks(MediaItemRecord $record): bool
     {
         return str_contains((string)$record->element, 'video');
+    }
+
+    /**
+     * Human-readable Mux processing status label for CP display.
+     *
+     * @param string $status Mux asset status (`preparing`, `ready`, `errored`, …)
+     * @return string
+     *
+     * @author boccdotdev
+     * @since 2.0.0
+     */
+    public function formatMuxStatusLabel(string $status): string
+    {
+        return match ($status) {
+            'ready' => Craft::t('polymedia', 'Ready'),
+            'preparing' => Craft::t('polymedia', 'Processing'),
+            'errored' => Craft::t('polymedia', 'Errored'),
+            default => $status !== '' ? $status : Craft::t('polymedia', 'Unknown'),
+        };
+    }
+
+    /**
+     * CSS-friendly status token for badge colouring.
+     *
+     * @param string $status Mux asset status
+     * @return string `ready`|`processing`|`errored`|`unknown`
+     *
+     * @author boccdotdev
+     * @since 2.0.0
+     */
+    public function muxStatusToken(string $status): string
+    {
+        return match ($status) {
+            'ready' => 'ready',
+            'preparing' => 'processing',
+            'errored' => 'errored',
+            default => 'unknown',
+        };
     }
 
     /**
@@ -243,6 +285,65 @@ class EditorContent extends Component
 
     // Private Methods
     // =========================================================================
+
+    /**
+     * Light Mux status + asset id summary for the asset editor.
+     *
+     * @param MediaItemRecord $record
+     * @return string
+     */
+    private function _renderMuxStatus(MediaItemRecord $record): string
+    {
+        $metadata = Plugin::getInstance()->getMediaItems()->getMetadata($record);
+        $status = isset($metadata['muxStatus']) ? (string)$metadata['muxStatus'] : '';
+        $muxAssetId = isset($metadata['muxAssetId']) ? (string)$metadata['muxAssetId'] : '';
+
+        if ($status === '' && $muxAssetId === '') {
+            return '';
+        }
+
+        $token = $this->muxStatusToken($status);
+        $label = $status !== '' ? $this->formatMuxStatusLabel($status) : '';
+
+        $html = Html::beginTag('div', [
+            'class' => 'field polymedia-mux-status-field',
+        ]);
+        $html .= Html::tag('div', Craft::t('polymedia', 'Mux'), ['class' => 'heading']);
+        $html .= Html::beginTag('div', ['class' => 'input']);
+
+        if ($label !== '') {
+            $html .= Html::tag(
+                'span',
+                Html::encode($label),
+                [
+                    'class' => "polymedia-mux-status-badge is-{$token}",
+                    'title' => Craft::t('polymedia', 'Mux processing status'),
+                ],
+            );
+        }
+
+        if ($muxAssetId !== '') {
+            $html .= Html::tag(
+                'div',
+                Craft::t('polymedia', 'Asset ID') . ': ' . Html::encode($muxAssetId),
+                ['class' => 'light', 'style' => 'margin-top: 6px;'],
+            );
+        }
+
+        $html .= Html::tag(
+            'p',
+            Craft::t(
+                'polymedia',
+                'Status is stored when the item is imported or uploaded. Refresh by re-importing from the Mux library if needed.',
+            ),
+            ['class' => 'instructions'],
+        );
+
+        $html .= Html::endTag('div');
+        $html .= Html::endTag('div');
+
+        return $html;
+    }
 
     /**
      * @param VolumeFolder|null $folder the folder uploads should land in

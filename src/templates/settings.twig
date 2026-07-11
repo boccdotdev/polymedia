@@ -108,8 +108,17 @@
     disabled: not allowAdminChanges,
 }) }}
 
+{{ forms.lightswitchField({
+    label: 'Auto-Fetch Poster'|t('polymedia'),
+    instructions: 'When adding a media URL without a custom poster, download a provider thumbnail (Mux first frame, YouTube/Vimeo stills, etc.) into the item folder. Mux library imports always fetch a poster when none is set.'|t('polymedia'),
+    id: 'autoFetchPoster',
+    name: 'autoFetchPoster',
+    on: settings.autoFetchPoster,
+    disabled: not allowAdminChanges,
+}) }}
+
 {# Dead settings (kept on Settings model for project config BC; UI removed 1.2.2):
-   autoFetchPoster, requireCaptionsForVideo, defaultCaptionLanguageFromSite, restrictAssetKinds #}
+   requireCaptionsForVideo, defaultCaptionLanguageFromSite, restrictAssetKinds #}
 
 <hr>
 
@@ -123,6 +132,66 @@
     on: settings.warnOnSignedUrlInPublicVolume,
     disabled: not allowAdminChanges,
 }) }}
+
+<hr>
+
+<h2>{{ 'Mux'|t('polymedia') }}</h2>
+
+{% if not isPro %}
+    <div class="readable">
+        <blockquote class="note tip">
+            <p>
+                {{ 'Mux library browse and direct upload require Polymedia Pro. Paste a Mux stream URL still works on Lite.'|t('polymedia') }}
+            </p>
+            <p>
+                <a href="https://plugins.craftcms.com/polymedia" target="_blank" rel="noopener">
+                    {{ 'Upgrade to Pro in the Plugin Store'|t('polymedia') }}
+                </a>
+            </p>
+        </blockquote>
+    </div>
+{% else %}
+    {% if not muxConfigured %}
+        <div class="readable">
+            <blockquote class="note">
+                <p>
+                    {{ 'Add both a Token ID and Secret to enable Browse Mux library and Upload to Mux in the Assets index.'|t('polymedia') }}
+                </p>
+            </blockquote>
+        </div>
+    {% endif %}
+
+    {{ forms.autosuggestField({
+        label: 'Mux Token ID'|t('polymedia'),
+        instructions: 'API access token ID from the Mux dashboard. Supports env vars (`$MUX_TOKEN_ID`).'|t('polymedia'),
+        id: 'muxTokenId',
+        name: 'muxTokenId',
+        value: settings.muxTokenId,
+        suggestEnvVars: true,
+        errors: settings.getErrors('muxTokenId'),
+        disabled: not allowAdminChanges,
+    }) }}
+
+    {{ forms.autosuggestField({
+        label: 'Mux Token Secret'|t('polymedia'),
+        instructions: 'API access token secret. Supports env vars (`$MUX_TOKEN_SECRET`).'|t('polymedia'),
+        id: 'muxTokenSecret',
+        name: 'muxTokenSecret',
+        value: settings.muxTokenSecret,
+        suggestEnvVars: true,
+        errors: settings.getErrors('muxTokenSecret'),
+        disabled: not allowAdminChanges,
+    }) }}
+
+    {{ forms.lightswitchField({
+        label: 'Delete Mux asset when Craft asset is deleted'|t('polymedia'),
+        instructions: 'When enabled, hard-deleting a Mux `.pmedia` asset also deletes the video from your Mux account. Soft-delete / trash is never sent to Mux. Default off.'|t('polymedia'),
+        id: 'deleteMuxAssetOnDelete',
+        name: 'deleteMuxAssetOnDelete',
+        on: settings.deleteMuxAssetOnDelete,
+        disabled: not allowAdminChanges,
+    }) }}
+{% endif %}
 
 <hr>
 

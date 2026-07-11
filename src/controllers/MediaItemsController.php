@@ -44,7 +44,7 @@ class MediaItemsController extends Controller
     // =========================================================================
 
     /**
-     * Returns the "Add media URL" slideout screen.
+     * Returns the "From URL" / add-media slideout screen.
      *
      * @return Response
      *
@@ -64,7 +64,7 @@ class MediaItemsController extends Controller
         $folder = $this->_resolveFolder($folderId, $currentUser, $settings);
 
         return $this->asCpScreen()
-            ->title(Craft::t('polymedia', 'Add media URL'))
+            ->title(Craft::t('polymedia', 'From URL'))
             ->contentTemplate('polymedia/_cp/create-screen', [
                 'providerTypes' => $providerTypes,
                 'folderId' => $folder?->id ?? '',
@@ -141,13 +141,18 @@ class MediaItemsController extends Controller
         );
 
         $posterIds = $request->getBodyParam('polymediaPoster');
+        $record = $plugin->getMediaItems()->getByAssetId((int)$asset->id);
+        $hasUserPoster = $posterIds !== null && $posterIds !== '' && $posterIds !== [];
 
-        if ($posterIds !== null && $posterIds !== '' && $posterIds !== []) {
-            $record = $plugin->getMediaItems()->getByAssetId($asset->id);
-
-            if ($record) {
-                $plugin->savePoster($record, $posterIds);
-                $this->_coLocatePoster($posterIds, (int)$folder->id, $asset);
+        if ($hasUserPoster && $record) {
+            $plugin->savePoster($record, $posterIds);
+            $this->_coLocatePoster($posterIds, (int)$folder->id, $asset);
+        } elseif ($record && $settings->autoFetchPoster) {
+            // User poster wins; otherwise download a derived still when enabled.
+            if ($detection->type === 'mux' && $detection->providerId !== '') {
+                $plugin->getPosterFetcher()->ensureMuxPoster($record, $detection->providerId);
+            } elseif ($derivedThumbnail) {
+                $plugin->getPosterFetcher()->fetchForItem($record, $derivedThumbnail);
             }
         }
 

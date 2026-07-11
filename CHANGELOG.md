@@ -1,5 +1,31 @@
 # Changelog
 
+## 2.0.0 - 2026-07-11
+
+### Added
+- **Lite / Pro editions.** Lite remains free URL media (including Mux paste). Pro gates Mux credentials UI, library browse, and direct upload.
+- Mux settings: Token ID, Token Secret (env-overridable), and optional “delete from Mux on Craft hard-delete” (default off).
+- `Mux` service wrapping `muxinc/mux-php` (`isConfigured`, list/get assets, direct upload, delete, first-frame thumbnail URL).
+- **Browse Mux library** CP modal (Pro + credentials): live Mux Assets API grid, “In Craft” badge, import/reuse by playback ID.
+- `PosterFetcher` downloads provider stills into the item folder and attaches as poster; user-selected posters win.
+- `FetchMuxPoster` queue job retries Mux first-frame downloads while assets are still processing.
+- CP asset thumbs for `.pmedia` files use the related poster (or remote thumbnail fallback).
+- `MediaItems::getByTypeAndProviderId()` / `getByTypeAndProviderIds()` for import reuse.
+- CP config flag `Craft.Polymedia.muxEnabled` (Pro + credentials).
+- **Upload to Mux** CP modal: direct upload via UpChunk, progress bar, poll until playback ID, create/reuse `.pmedia`, first-frame poster job.
+- Vendored `@mux/upchunk` in the CP asset bundle.
+- Optional **delete Mux asset on Craft hard-delete** (default off); soft-delete never calls Mux. Remote delete is synchronous (v1); Lite/unconfigured skips log a warning rather than failing silently.
+- Light **Mux status badge** + asset id on the asset editor for imported/uploaded items.
+- README: Lite/Pro editions, Mux credentials, browse/upload, poster priority, folder-image limits, public playback.
+
+### Changed
+- CP: the separate **Add media URL**, **Browse Mux library**, and **Upload to Mux** buttons are now a single **Add media** disclosure menu (**From URL** / **Browse Mux library** / **Upload to Mux**) beside **Upload files**, on both the Assets index and field selection modals.
+- Mux upload modal: Craft-style file picker (hidden input + upload button + filename), a cancel notice, and an auto-sizing shell so progress/status rows never clip.
+- Mux thumbnail URLs use first frame (`?time=0`) instead of Mux’s mid-video default.
+- `autoFetchPoster` is implemented and re-enabled in settings (URL create path downloads a poster when none is supplied).
+- Mux library imports always attempt a first-frame poster when the item has no poster.
+- License changed from MIT to the [Craft License](https://craftcms.github.io/license/) (`proprietary`) with the introduction of the commercial Pro edition. Lite remains free to install from the Plugin Store.
+
 ## 1.3.0 - 2026-07-11
 
 ### Added

@@ -12,6 +12,7 @@
 namespace boccdotdev\polymedia\services;
 
 use boccdotdev\polymedia\records\MediaItemRecord;
+use craft\helpers\Json;
 use yii\base\Component;
 
 /**
@@ -52,6 +53,30 @@ class MediaItems extends Component
 
         $record = MediaItemRecord::findOne(['assetId' => $assetId]);
         $this->_byAssetId[$assetId] = $record;
+
+        return $record;
+    }
+
+    /**
+     * Returns the media item record by primary key.
+     *
+     * @param int $id the media item record ID
+     * @return ?MediaItemRecord
+     *
+     * @author boccdotdev
+     * @since 2.0.0
+     */
+    public function getById(int $id): ?MediaItemRecord
+    {
+        if ($id <= 0) {
+            return null;
+        }
+
+        $record = MediaItemRecord::findOne(['id' => $id]);
+
+        if ($record) {
+            $this->_byAssetId[(int)$record->assetId] = $record;
+        }
 
         return $record;
     }
@@ -142,5 +167,111 @@ class MediaItems extends Component
     public function getByType(string $type): array
     {
         return MediaItemRecord::findAll(['type' => $type]);
+    }
+
+    /**
+     * Returns the media item for a provider type + provider id (e.g. mux playback id).
+     *
+     * Used to reuse an existing `.pmedia` when re-importing from the Mux library
+     * or completing an upload that already has a Craft asset.
+     *
+     * @param string $type media type key (`mux`, `youtube`, …)
+     * @param string $providerId provider-specific id (Mux playback ID, etc.)
+     * @return ?MediaItemRecord
+     *
+     * @author boccdotdev
+     * @since 2.0.0
+     */
+    public function getByTypeAndProviderId(string $type, string $providerId): ?MediaItemRecord
+    {
+        if ($type === '' || $providerId === '') {
+            return null;
+        }
+
+        $record = MediaItemRecord::findOne([
+            'type' => $type,
+            'providerId' => $providerId,
+        ]);
+
+        if ($record) {
+            $this->_byAssetId[(int)$record->assetId] = $record;
+        }
+
+        return $record;
+    }
+
+    /**
+     * Returns media item records keyed by providerId for a batch of ids (one type).
+     *
+     * @param string $type media type key
+     * @param string[] $providerIds provider ids to look up
+     * @return array<string, MediaItemRecord> keyed by providerId
+     *
+     * @author boccdotdev
+     * @since 2.0.0
+     */
+    public function getByTypeAndProviderIds(string $type, array $providerIds): array
+    {
+        $providerIds = array_values(array_unique(array_filter($providerIds, static fn($id) => $id !== null && $id !== '')));
+
+        if ($type === '' || $providerIds === []) {
+            return [];
+        }
+
+        /** @var MediaItemRecord[] $records */
+        $records = MediaItemRecord::find()
+            ->where(['type' => $type, 'providerId' => $providerIds])
+            ->all();
+
+        $map = [];
+
+        foreach ($records as $record) {
+            $map[(string)$record->providerId] = $record;
+            $this->_byAssetId[(int)$record->assetId] = $record;
+        }
+
+        return $map;
+    }
+
+    /**
+     * Decodes a media item’s JSON `metadata` column to an array.
+     *
+     * @param MediaItemRecord $record
+     * @return array<string, mixed>
+     *
+     * @author boccdotdev
+     * @since 2.0.0
+     */
+    public function getMetadata(MediaItemRecord $record): array
+    {
+        return self::decodeMetadataJson($record->metadata);
+    }
+
+    /**
+     * Decodes a raw metadata JSON string (or empty/null) to an array.
+     *
+     * @param mixed $raw value from the `metadata` column
+     * @return array<string, mixed>
+     *
+     * @author boccdotdev
+     * @since 2.0.0
+     */
+    public static function decodeMetadataJson(mixed $raw): array
+    {
+        if ($raw === null || $raw === '') {
+            return [];
+        }
+
+        if (is_array($raw)) {
+            return $raw;
+        }
+
+        if (!is_string($raw)) {
+            return [];
+        }
+
+        $decoded = Json::decodeIfJson($raw);
+
+        return is_array($decoded) ? $decoded : [];
     }
 }

@@ -46,6 +46,7 @@ class ManifestWriter extends Component
      * @param DetectionResult $detection the detection result
      * @param string $title the user-supplied title
      * @param ?string $derivedThumbnail the derived thumbnail URL (from ThumbnailDeriver)
+     * @param array $extraMetadata merged into manifest/record metadata (e.g. muxAssetId)
      * @return Asset the saved asset element
      * @throws \Throwable if the asset could not be saved
      *
@@ -58,8 +59,9 @@ class ManifestWriter extends Component
         DetectionResult $detection,
         string $title,
         ?string $derivedThumbnail = null,
+        array $extraMetadata = [],
     ): Asset {
-        $manifest = $this->_buildManifest($detection, $title, $derivedThumbnail);
+        $manifest = $this->_buildManifest($detection, $title, $derivedThumbnail, $extraMetadata);
         $json = Json::encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 
         $slug = StringHelper::slugify($title);
@@ -88,7 +90,7 @@ class ManifestWriter extends Component
             );
         }
 
-        $this->_createRecord($asset, $detection, $title, $derivedThumbnail);
+        $this->_createRecord($asset, $detection, $title, $derivedThumbnail, $extraMetadata);
 
         return $asset;
     }
@@ -305,12 +307,14 @@ class ManifestWriter extends Component
      * @param DetectionResult $detection the detection result
      * @param string $title the title
      * @param ?string $derivedThumbnail the derived thumbnail URL
+     * @param array $extraMetadata additional metadata keys
      * @return array
      */
     private function _buildManifest(
         DetectionResult $detection,
         string $title,
         ?string $derivedThumbnail,
+        array $extraMetadata = [],
     ): array {
         $manifest = [
             'polymedia' => '1.0',
@@ -320,15 +324,7 @@ class ManifestWriter extends Component
             'providerId' => $detection->providerId,
         ];
 
-        $metadata = [];
-
-        if ($derivedThumbnail !== null) {
-            $metadata['thumbnail'] = $derivedThumbnail;
-        }
-
-        if (!empty($detection->hints)) {
-            $metadata['hints'] = $detection->hints;
-        }
+        $metadata = $this->_buildMetadata($detection, $derivedThumbnail, $extraMetadata);
 
         if (!empty($metadata)) {
             $manifest['metadata'] = $metadata;
@@ -344,12 +340,14 @@ class ManifestWriter extends Component
      * @param DetectionResult $detection the detection result
      * @param string $title the title
      * @param ?string $derivedThumbnail the derived thumbnail URL
+     * @param array $extraMetadata additional metadata keys
      */
     private function _createRecord(
         Asset $asset,
         DetectionResult $detection,
         string $title,
         ?string $derivedThumbnail,
+        array $extraMetadata = [],
     ): void {
         $mediaItems = Plugin::getInstance()->getMediaItems();
 
@@ -358,7 +356,7 @@ class ManifestWriter extends Component
         }
 
         $defaults = new PlayerSettings();
-        $metadata = $this->_buildMetadata($detection, $derivedThumbnail);
+        $metadata = $this->_buildMetadata($detection, $derivedThumbnail, $extraMetadata);
 
         $record = new MediaItemRecord();
         $record->assetId = $asset->id;
@@ -378,10 +376,14 @@ class ManifestWriter extends Component
      *
      * @param DetectionResult $detection the detection result
      * @param ?string $derivedThumbnail the derived thumbnail URL
+     * @param array $extraMetadata additional metadata keys (e.g. muxAssetId)
      * @return array
      */
-    private function _buildMetadata(DetectionResult $detection, ?string $derivedThumbnail): array
-    {
+    private function _buildMetadata(
+        DetectionResult $detection,
+        ?string $derivedThumbnail,
+        array $extraMetadata = [],
+    ): array {
         $metadata = [];
 
         if ($derivedThumbnail !== null) {
@@ -390,6 +392,10 @@ class ManifestWriter extends Component
 
         if (!empty($detection->hints)) {
             $metadata['hints'] = $detection->hints;
+        }
+
+        if ($extraMetadata !== []) {
+            $metadata = array_merge($metadata, $extraMetadata);
         }
 
         return $metadata;
