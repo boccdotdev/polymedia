@@ -22,6 +22,7 @@ use boccdotdev\polymedia\services\AssetFieldSettings;
 use boccdotdev\polymedia\services\EditorContent;
 use boccdotdev\polymedia\services\ManifestWriter;
 use boccdotdev\polymedia\services\MediaItems;
+use boccdotdev\polymedia\services\Mux;
 use boccdotdev\polymedia\services\ProviderFilter;
 use boccdotdev\polymedia\services\RelatedAssets;
 use boccdotdev\polymedia\services\Renderer;
@@ -69,12 +70,26 @@ use yii\base\Event;
  * @property-read AssetFieldSettings $assetFieldSettings
  * @property-read ProviderFilter $providerFilter
  * @property-read EditorContent $editorContent
+ * @property-read Mux $mux
  *
  * @author boccdotdev
  * @since 1.0.0
  */
 class Plugin extends BasePlugin
 {
+    // Const Properties
+    // =========================================================================
+
+    /**
+     * Free edition: URL media (including Mux paste), field, player.
+     */
+    public const EDITION_LITE = 'lite';
+
+    /**
+     * Commercial edition: Lite + Mux credentials, library browse, direct upload.
+     */
+    public const EDITION_PRO = 'pro';
+
     // Public Properties
     // =========================================================================
 
@@ -99,6 +114,17 @@ class Plugin extends BasePlugin
     /**
      * @inheritdoc
      */
+    public static function editions(): array
+    {
+        return [
+            self::EDITION_LITE,
+            self::EDITION_PRO,
+        ];
+    }
+
+    /**
+     * @inheritdoc
+     */
     public function init(): void
     {
         parent::init();
@@ -119,6 +145,7 @@ class Plugin extends BasePlugin
             'assetFieldSettings' => AssetFieldSettings::class,
             'providerFilter' => ProviderFilter::class,
             'editorContent' => EditorContent::class,
+            'mux' => Mux::class,
         ]);
 
         $this->_registerFileKind();
@@ -134,6 +161,33 @@ class Plugin extends BasePlugin
         $this->_registerAssetFieldValidation();
         $this->_registerTwigVariable();
         $this->_registerCpAssets();
+    }
+
+    /**
+     * Returns whether the active edition is Pro (or higher).
+     *
+     * @return bool
+     *
+     * @author boccdotdev
+     * @since 2.0.0
+     */
+    public function getIsPro(): bool
+    {
+        return $this->is(self::EDITION_PRO, '>=');
+    }
+
+    /**
+     * Returns whether Mux library/upload UI and controllers may run:
+     * Pro edition with both credentials configured.
+     *
+     * @return bool
+     *
+     * @author boccdotdev
+     * @since 2.0.0
+     */
+    public function getMuxEnabled(): bool
+    {
+        return $this->getIsPro() && $this->getMux()->isConfigured();
     }
 
     /**
@@ -253,6 +307,19 @@ class Plugin extends BasePlugin
         return $this->get('editorContent');
     }
 
+    /**
+     * Returns the Mux API service.
+     *
+     * @return Mux
+     *
+     * @author boccdotdev
+     * @since 2.0.0
+     */
+    public function getMux(): Mux
+    {
+        return $this->get('mux');
+    }
+
     // Protected Methods
     // =========================================================================
 
@@ -293,6 +360,8 @@ class Plugin extends BasePlugin
         return Craft::$app->getView()->renderTemplate('polymedia/settings', [
             'settings' => $this->getSettings(),
             'volumeOptions' => $volumeOptions,
+            'isPro' => $this->getIsPro(),
+            'muxConfigured' => $this->getMux()->isConfigured(),
         ]);
     }
 
@@ -820,7 +889,7 @@ class Plugin extends BasePlugin
     }
 
     /**
-     * Registers the CP asset bundle on CP requests.
+     * Registers the CP asset bundle on CP requests and passes Mux feature flags.
      */
     private function _registerCpAssets(): void
     {
@@ -837,7 +906,16 @@ class Plugin extends BasePlugin
                 $view->registerTranslations('polymedia', [
                     'Add media URL',
                     'Media item created.',
+                    'Browse Mux library',
+                    'Upload to Mux',
                 ]);
+                $view->registerJs(
+                    'window.CraftPolymediaConfig = ' . Json::encode([
+                        'muxEnabled' => $this->getMuxEnabled(),
+                        'isPro' => $this->getIsPro(),
+                    ]) . ';',
+                    View::POS_HEAD,
+                );
             },
         );
     }

@@ -102,6 +102,24 @@ class Settings extends Model
      */
     public array $defaultFieldAllowedProviders = [];
 
+    /**
+     * @var ?string Mux API Token ID. Supports env syntax (`$MUX_TOKEN_ID`).
+     * @since 2.0.0
+     */
+    public ?string $muxTokenId = null;
+
+    /**
+     * @var ?string Mux API Token Secret. Supports env syntax (`$MUX_TOKEN_SECRET`).
+     * @since 2.0.0
+     */
+    public ?string $muxTokenSecret = null;
+
+    /**
+     * @var bool When true, hard-deleting a Mux `.pmedia` also deletes the Mux asset.
+     * Default off so Craft trash/delete only affects local records.
+     * @since 2.0.0
+     */
+    public bool $deleteMuxAssetOnDelete = false;
 
     // Public Methods
     // =========================================================================
@@ -114,7 +132,7 @@ class Settings extends Model
         $rules = parent::defineRules();
 
         $rules[] = [['mediaChromeVersion', 'scriptLoaderMode', 'cdnHost'], 'required'];
-        $rules[] = [['mediaChromeVersion', 'cdnHost'], 'string'];
+        $rules[] = [['mediaChromeVersion', 'cdnHost', 'muxTokenId', 'muxTokenSecret'], 'string'];
         $rules[] = [['selfHostBaseUrl'], 'string'];
         $rules[] = [['defaultVolumeUid', 'attachmentsVolumeUid'], 'string', 'max' => 36];
         $rules[] = [['scriptLoaderMode'], 'in', 'range' => ['cdn', 'self-host', 'none']];
@@ -127,6 +145,7 @@ class Settings extends Model
                 'validateVttOnUpload',
                 'autoFetchPoster',
                 'warnOnSignedUrlInPublicVolume',
+                'deleteMuxAssetOnDelete',
             ],
             'boolean',
         ];

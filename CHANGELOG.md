@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Lite / Pro editions.** Lite remains free URL media (including Mux paste). Pro gates Mux credentials UI, library browse, and direct upload.
+- Mux settings: Token ID, Token Secret (env-overridable), and optional “delete from Mux on Craft hard-delete” (default off).
+- `Mux` service wrapping `muxinc/mux-php` (`isConfigured`, list/get assets, direct upload, delete, first-frame thumbnail URL).
+- `MuxController` skeleton with Pro + credentials gates (`library`, `import`, `create-upload`, `upload-status`, `complete-upload`).
+- CP config flag `Craft.Polymedia.muxEnabled` (Pro + credentials) for upcoming browse/upload buttons.
+
 ## 1.3.0 - 2026-07-11
 
 ### Added

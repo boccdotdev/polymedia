@@ -22,6 +22,12 @@
   }
 
   Craft.Polymedia = {
+    // Set from PHP via window.CraftPolymediaConfig (Pro + Mux credentials).
+    muxEnabled: !!(
+      window.CraftPolymediaConfig && window.CraftPolymediaConfig.muxEnabled
+    ),
+    isPro: !!(window.CraftPolymediaConfig && window.CraftPolymediaConfig.isPro),
+
     init: function () {
       // Catches indexes created after this runs, e.g. asset selection modals.
       Garnish.on(Craft.AssetIndex, 'afterInit', function (ev) {
