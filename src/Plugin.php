@@ -941,6 +941,17 @@ class Plugin extends BasePlugin
                     'Processing',
                     'Ready',
                     'Errored',
+                    'Title',
+                    'Video file',
+                    'Start upload',
+                    'Uploading…',
+                    'Processing on Mux…',
+                    'Creating media item…',
+                    'Mux upload complete.',
+                    'Upload failed.',
+                    'Choose a video file.',
+                    'Poster will be generated from the first frame when ready.',
+                    'Cancel',
                 ]);
                 $view->registerJs(
                     'window.CraftPolymediaConfig = ' . Json::encode([

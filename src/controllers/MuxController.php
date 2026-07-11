@@ -104,7 +104,6 @@ class MuxController extends Controller
             return $denied;
         }
 
-        $plugin = Plugin::getInstance();
         $request = Craft::$app->getRequest();
         $muxAssetId = trim((string)$request->getRequiredBodyParam('muxAssetId'));
         $folderId = (int)$request->getBodyParam('folderId') ?: null;
@@ -113,6 +112,229 @@ class MuxController extends Controller
         if ($muxAssetId === '') {
             return $this->asFailure(Craft::t('polymedia', 'Mux asset id is required.'));
         }
+
+        return $this->_respondFromMuxAssetId(
+            $muxAssetId,
+            $folderId,
+            $titleOverride,
+            Craft::t('polymedia', 'Mux media imported.'),
+        );
+    }
+
+    /**
+     * Creates a Mux direct-upload URL for the browser to PUT with UpChunk.
+     *
+     * @return Response
+     *
+     * @author boccdotdev
+     * @since 2.0.0
+     */
+    public function actionCreateUpload(): Response
+    {
+        $this->requireCpRequest();
+        $this->requirePostRequest();
+        $this->requireAcceptsJson();
+
+        $denied = $this->_denyUnlessMuxEnabled();
+
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        $plugin = Plugin::getInstance();
+        $request = Craft::$app->getRequest();
+        $title = trim((string)$request->getBodyParam('title', ''));
+        $folderId = (int)$request->getBodyParam('folderId') ?: null;
+
+        $settings = $plugin->getSettings();
+        $currentUser = Craft::$app->getUser()->getIdentity();
+        $folder = $this->_resolveFolder($folderId, $currentUser, $settings);
+
+        if (!$folder) {
+            return $this->asFailure(Craft::t(
+                'polymedia',
+                'You do not have permission to save assets in this volume.',
+            ));
+        }
+
+        try {
+            $upload = $plugin->getMux()->createDirectUpload($title);
+        } catch (\Throwable $e) {
+            return $this->asFailure($e->getMessage());
+        }
+
+        if (empty($upload['uploadUrl']) || empty($upload['uploadId'])) {
+            return $this->asFailure(Craft::t(
+                'polymedia',
+                'Mux did not return an upload URL.',
+            ));
+        }
+
+        return $this->asSuccess(data: [
+            'uploadId' => $upload['uploadId'],
+            'uploadUrl' => $upload['uploadUrl'],
+            'status' => $upload['status'],
+            'folderId' => (int)$folder->id,
+            'title' => $title,
+        ]);
+    }
+
+    /**
+     * Polls a Mux direct upload until an asset id (and preferably playback id) is available.
+     *
+     * @return Response
+     *
+     * @author boccdotdev
+     * @since 2.0.0
+     */
+    public function actionUploadStatus(): Response
+    {
+        $this->requireCpRequest();
+        $this->requireAcceptsJson();
+
+        $denied = $this->_denyUnlessMuxEnabled();
+
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        $uploadId = trim((string)Craft::$app->getRequest()->getRequiredParam('uploadId'));
+
+        if ($uploadId === '') {
+            return $this->asFailure(Craft::t('polymedia', 'Upload id is required.'));
+        }
+
+        $plugin = Plugin::getInstance();
+
+        try {
+            $upload = $plugin->getMux()->getUpload($uploadId);
+        } catch (\Throwable $e) {
+            return $this->asFailure($e->getMessage());
+        }
+
+        $status = (string)$upload['status'];
+        $muxAssetId = $upload['assetId'];
+        $playbackId = null;
+        $muxStatus = null;
+        $ready = false;
+
+        if ($status === 'errored' || $status === 'cancelled' || $status === 'timed_out') {
+            return $this->asSuccess(data: [
+                'uploadId' => $upload['uploadId'],
+                'status' => $status,
+                'assetId' => $muxAssetId,
+                'playbackId' => null,
+                'ready' => false,
+                'failed' => true,
+                'message' => Craft::t('polymedia', 'Mux upload failed ({status}).', [
+                    'status' => $status,
+                ]),
+            ]);
+        }
+
+        if ($muxAssetId) {
+            try {
+                $muxAsset = $plugin->getMux()->getAsset((string)$muxAssetId);
+                $playbackId = $muxAsset['playbackId'] ?? null;
+                $muxStatus = $muxAsset['status'] ?? null;
+                // Playback ID is enough to create a playable `.pmedia` even while preparing.
+                $ready = is_string($playbackId) && $playbackId !== '';
+            } catch (\Throwable) {
+                // Asset may not be queryable yet — keep polling.
+                $ready = false;
+            }
+        }
+
+        return $this->asSuccess(data: [
+            'uploadId' => $upload['uploadId'],
+            'status' => $status,
+            'assetId' => $muxAssetId,
+            'playbackId' => $playbackId,
+            'muxStatus' => $muxStatus,
+            'ready' => $ready,
+            'failed' => false,
+        ]);
+    }
+
+    /**
+     * Completes a Mux upload by creating/reusing a `.pmedia` asset.
+     *
+     * Accepts either `muxAssetId` or `uploadId` (resolved to an asset id).
+     *
+     * @return Response
+     *
+     * @author boccdotdev
+     * @since 2.0.0
+     */
+    public function actionCompleteUpload(): Response
+    {
+        $this->requireCpRequest();
+        $this->requirePostRequest();
+        $this->requireAcceptsJson();
+
+        $denied = $this->_denyUnlessMuxEnabled();
+
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        $request = Craft::$app->getRequest();
+        $muxAssetId = trim((string)$request->getBodyParam('muxAssetId', ''));
+        $uploadId = trim((string)$request->getBodyParam('uploadId', ''));
+        $folderId = (int)$request->getBodyParam('folderId') ?: null;
+        $titleOverride = trim((string)$request->getBodyParam('title', ''));
+
+        if ($muxAssetId === '' && $uploadId !== '') {
+            try {
+                $upload = Plugin::getInstance()->getMux()->getUpload($uploadId);
+            } catch (\Throwable $e) {
+                return $this->asFailure($e->getMessage());
+            }
+
+            $muxAssetId = (string)($upload['assetId'] ?? '');
+
+            if ($muxAssetId === '') {
+                return $this->asFailure(Craft::t(
+                    'polymedia',
+                    'Mux has not created an asset for this upload yet. Keep polling.',
+                ));
+            }
+        }
+
+        if ($muxAssetId === '') {
+            return $this->asFailure(Craft::t(
+                'polymedia',
+                'Mux asset id or upload id is required.',
+            ));
+        }
+
+        return $this->_respondFromMuxAssetId(
+            $muxAssetId,
+            $folderId,
+            $titleOverride,
+            Craft::t('polymedia', 'Mux upload complete.'),
+        );
+    }
+
+    // Private Methods
+    // =========================================================================
+
+    /**
+     * Shared import/complete path: resolve Mux asset → reuse or create `.pmedia`.
+     *
+     * @param string $muxAssetId Mux asset id
+     * @param ?int $folderId target folder for new imports
+     * @param string $titleOverride optional title
+     * @param string $successMessage success flash/JSON message for new creates
+     * @return Response
+     */
+    private function _respondFromMuxAssetId(
+        string $muxAssetId,
+        ?int $folderId,
+        string $titleOverride,
+        string $successMessage,
+    ): Response {
+        $plugin = Plugin::getInstance();
 
         try {
             $muxAsset = $plugin->getMux()->getAsset($muxAssetId);
@@ -142,7 +364,6 @@ class MuxController extends Controller
             $asset = Craft::$app->getAssets()->getAssetById((int)$existing->assetId);
 
             if ($asset) {
-                // Best-effort poster fill if still missing.
                 $plugin->getPosterFetcher()->ensureMuxPoster($existing, $playbackId);
 
                 return $this->asSuccess(
@@ -210,7 +431,7 @@ class MuxController extends Controller
         }
 
         return $this->asSuccess(
-            Craft::t('polymedia', 'Mux media imported.'),
+            $successMessage,
             [
                 'assetId' => $asset->id,
                 'reused' => false,
@@ -218,86 +439,6 @@ class MuxController extends Controller
             ],
         );
     }
-
-    /**
-     * Creates a Mux direct-upload URL for the browser to PUT with UpChunk.
-     *
-     * @return Response
-     *
-     * @author boccdotdev
-     * @since 2.0.0
-     */
-    public function actionCreateUpload(): Response
-    {
-        $this->requireCpRequest();
-        $this->requirePostRequest();
-        $this->requireAcceptsJson();
-
-        $denied = $this->_denyUnlessMuxEnabled();
-
-        if ($denied !== null) {
-            return $denied;
-        }
-
-        return $this->asFailure(Craft::t(
-            'polymedia',
-            'Mux direct upload is not available yet.',
-        ));
-    }
-
-    /**
-     * Polls a Mux direct upload until an asset id is available.
-     *
-     * @return Response
-     *
-     * @author boccdotdev
-     * @since 2.0.0
-     */
-    public function actionUploadStatus(): Response
-    {
-        $this->requireCpRequest();
-        $this->requireAcceptsJson();
-
-        $denied = $this->_denyUnlessMuxEnabled();
-
-        if ($denied !== null) {
-            return $denied;
-        }
-
-        return $this->asFailure(Craft::t(
-            'polymedia',
-            'Mux upload status is not available yet.',
-        ));
-    }
-
-    /**
-     * Completes a Mux upload by creating/reusing a `.pmedia` asset.
-     *
-     * @return Response
-     *
-     * @author boccdotdev
-     * @since 2.0.0
-     */
-    public function actionCompleteUpload(): Response
-    {
-        $this->requireCpRequest();
-        $this->requirePostRequest();
-        $this->requireAcceptsJson();
-
-        $denied = $this->_denyUnlessMuxEnabled();
-
-        if ($denied !== null) {
-            return $denied;
-        }
-
-        return $this->asFailure(Craft::t(
-            'polymedia',
-            'Mux upload completion is not available yet.',
-        ));
-    }
-
-    // Private Methods
-    // =========================================================================
 
     /**
      * Returns a failure response when the request is not Pro + Mux-configured,

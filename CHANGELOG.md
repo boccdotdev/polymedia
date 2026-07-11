@@ -12,6 +12,8 @@
 - CP asset thumbs for `.pmedia` files use the related poster (or remote thumbnail fallback).
 - `MediaItems::getByTypeAndProviderId()` / `getByTypeAndProviderIds()` for import reuse.
 - CP config flag `Craft.Polymedia.muxEnabled` (Pro + credentials).
+- **Upload to Mux** CP modal: direct upload via UpChunk, progress bar, poll until playback ID, create/reuse `.pmedia`, first-frame poster job.
+- Vendored `@mux/upchunk` in the CP asset bundle.
 
 ### Changed
 - Mux thumbnail URLs use first frame (`?time=0`) instead of Mux’s mid-video default.

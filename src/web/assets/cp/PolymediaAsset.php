@@ -40,6 +40,7 @@ class PolymediaAsset extends AssetBundle
         ];
 
         $this->js = [
+            'upchunk.js',
             'polymedia.js',
         ];
 

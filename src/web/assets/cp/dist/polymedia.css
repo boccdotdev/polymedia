@@ -3,7 +3,8 @@
     margin-inline-start: 7px;
 }
 
-.toolbar .polymedia-mux-browse-btn {
+.toolbar .polymedia-mux-browse-btn,
+.toolbar .polymedia-mux-upload-btn {
     margin-inline-start: 7px;
 }
 
@@ -158,4 +159,62 @@
     min-width: 2ch;
     text-align: center;
     color: var(--gray-550, #596673);
+}
+
+/* Mux upload modal
+   ========================================================================== */
+
+.polymedia-mux-upload-modal {
+    width: min(480px, 96vw);
+}
+
+.polymedia-mux-upload-modal .header {
+    padding: 18px 24px 12px;
+    border-bottom: 1px solid var(--hairline-color, #e3e5e8);
+}
+
+.polymedia-mux-upload-modal .header h1 {
+    margin: 0;
+    font-size: 18px;
+}
+
+.polymedia-mux-upload-modal .body {
+    padding: 16px 24px 8px;
+}
+
+.polymedia-mux-upload-modal .footer {
+    border-top: 1px solid var(--hairline-color, #e3e5e8);
+    padding: 12px 24px;
+}
+
+.polymedia-mux-hint {
+    color: var(--gray-550, #596673);
+    font-size: 12px;
+    margin: 0 0 12px;
+}
+
+.polymedia-mux-progress {
+    margin: 8px 0 10px;
+}
+
+.polymedia-mux-progress-track {
+    height: 8px;
+    border-radius: 4px;
+    background: var(--gray-100, #f3f7fc);
+    overflow: hidden;
+}
+
+.polymedia-mux-progress-bar {
+    height: 100%;
+    width: 0;
+    border-radius: 4px;
+    background: var(--blue-600, #2563eb);
+    transition: width 0.15s ease-out;
+}
+
+.polymedia-mux-upload-status {
+    min-height: 1.25em;
+    font-size: 12px;
+    color: var(--gray-550, #596673);
+    margin-bottom: 8px;
 }

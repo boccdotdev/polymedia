@@ -52,15 +52,31 @@
           '</button>'
       );
 
-      var $muxBtn = null;
+      var $muxBrowseBtn = null;
+      var $muxUploadBtn = null;
 
       if (Craft.Polymedia.muxEnabled) {
-        $muxBtn = $(
+        $muxBrowseBtn = $(
           '<button type="button" class="btn polymedia-mux-browse-btn">' +
             Craft.t('polymedia', 'Browse Mux library') +
             '</button>'
         );
+        $muxUploadBtn = $(
+          '<button type="button" class="btn polymedia-mux-upload-btn">' +
+            Craft.t('polymedia', 'Upload to Mux') +
+            '</button>'
+        );
       }
+
+      var placeMuxButtons = function ($after) {
+        if ($muxBrowseBtn) {
+          $after.after($muxBrowseBtn);
+          $after = $muxBrowseBtn;
+        }
+        if ($muxUploadBtn) {
+          $after.after($muxUploadBtn);
+        }
+      };
 
       if (assetIndex.settings && assetIndex.settings.context === 'index') {
         // Standalone Assets index: sit just before the "Upload files" button.
@@ -71,15 +87,11 @@
 
           if ($upload && $upload.length) {
             $upload.before($btn);
-            if ($muxBtn) {
-              $btn.after($muxBtn);
-            }
           } else {
             assetIndex.addButton($btn);
-            if ($muxBtn) {
-              assetIndex.addButton($muxBtn);
-            }
           }
+
+          placeMuxButtons($btn);
         };
 
         place();
@@ -104,9 +116,7 @@
           $toolbar.append($btn);
         }
 
-        if ($muxBtn) {
-          $btn.after($muxBtn);
-        }
+        placeMuxButtons($btn);
       }
 
       assetIndex._polymediaBtnInjected = true;
@@ -115,9 +125,15 @@
         Craft.Polymedia.openSlideout(assetIndex);
       });
 
-      if ($muxBtn) {
-        $muxBtn.on('click', function () {
+      if ($muxBrowseBtn) {
+        $muxBrowseBtn.on('click', function () {
           Craft.Polymedia.openMuxBrowse(assetIndex);
+        });
+      }
+
+      if ($muxUploadBtn) {
+        $muxUploadBtn.on('click', function () {
+          Craft.Polymedia.openMuxUpload(assetIndex);
         });
       }
     },
@@ -147,6 +163,17 @@
       }
 
       new Craft.Polymedia.MuxBrowseModal({
+        assetIndex: assetIndex,
+        folderId: Craft.Polymedia._folderId(assetIndex),
+      });
+    },
+
+    openMuxUpload: function (assetIndex) {
+      if (!Craft.Polymedia.muxEnabled) {
+        return;
+      }
+
+      new Craft.Polymedia.MuxUploadModal({
         assetIndex: assetIndex,
         folderId: Craft.Polymedia._folderId(assetIndex),
       });
@@ -434,6 +461,363 @@
             Craft.t('app', 'A server error occurred.');
           Craft.cp.displayError(message);
         });
+    },
+  });
+
+  /**
+   * Modal: direct upload a video to Mux via UpChunk, then create `.pmedia`.
+   */
+  Craft.Polymedia.MuxUploadModal = Garnish.Modal.extend({
+    assetIndex: null,
+    folderId: null,
+    uploadId: null,
+    pollTimer: null,
+    upchunk: null,
+    busy: false,
+    $title: null,
+    $file: null,
+    $progress: null,
+    $progressBar: null,
+    $status: null,
+    $startBtn: null,
+    $cancelBtn: null,
+
+    init: function (settings) {
+      this.assetIndex = settings.assetIndex || null;
+      this.folderId = settings.folderId || null;
+
+      var $container = $(
+        '<div class="modal fitted polymedia-mux-upload-modal" role="dialog" aria-label="' +
+          Craft.escapeHtml(Craft.t('polymedia', 'Upload to Mux')) +
+          '"/>'
+      );
+
+      var $header = $(
+        '<div class="header"><h1>' +
+          Craft.escapeHtml(Craft.t('polymedia', 'Upload to Mux')) +
+          '</h1></div>'
+      );
+
+      var $body = $('<div class="body"/>');
+      $body.append(
+        $(
+          '<div class="field">' +
+            '<div class="heading"><label for="polymedia-mux-title">' +
+            Craft.escapeHtml(Craft.t('polymedia', 'Title')) +
+            '</label></div>' +
+            '<div class="input"><input type="text" id="polymedia-mux-title" class="text fullwidth" autocomplete="off"/></div>' +
+            '</div>'
+        )
+      );
+      $body.append(
+        $(
+          '<div class="field">' +
+            '<div class="heading"><label for="polymedia-mux-file">' +
+            Craft.escapeHtml(Craft.t('polymedia', 'Video file')) +
+            '</label></div>' +
+            '<div class="input"><input type="file" id="polymedia-mux-file" accept="video/*,.mp4,.mov,.m4v,.webm,.mkv"/></div>' +
+            '</div>'
+        )
+      );
+      $body.append(
+        $(
+          '<p class="polymedia-mux-hint">' +
+            Craft.escapeHtml(
+              Craft.t(
+                'polymedia',
+                'Poster will be generated from the first frame when ready.'
+              )
+            ) +
+            '</p>'
+        )
+      );
+
+      this.$progress = $(
+        '<div class="polymedia-mux-progress" hidden>' +
+          '<div class="polymedia-mux-progress-track"><div class="polymedia-mux-progress-bar"/></div>' +
+          '</div>'
+      );
+      this.$progressBar = this.$progress.find('.polymedia-mux-progress-bar');
+      this.$status = $('<div class="polymedia-mux-upload-status"/>');
+      $body.append(this.$progress, this.$status);
+
+      this.$title = $body.find('#polymedia-mux-title');
+      this.$file = $body.find('#polymedia-mux-file');
+
+      var $footer = $(
+        '<div class="footer">' +
+          '<div class="buttons right">' +
+          '<button type="button" class="btn" data-action="cancel">' +
+          Craft.escapeHtml(Craft.t('polymedia', 'Cancel')) +
+          '</button>' +
+          '<button type="button" class="btn submit" data-action="start">' +
+          Craft.escapeHtml(Craft.t('polymedia', 'Start upload')) +
+          '</button>' +
+          '</div></div>'
+      );
+
+      this.$startBtn = $footer.find('[data-action="start"]');
+      this.$cancelBtn = $footer.find('[data-action="cancel"]');
+
+      $container.append($header, $body, $footer);
+
+      this.base($container, {
+        hideOnShadeClick: false,
+        shadeClass: 'modal-shade dark',
+      });
+
+      this.addListener(this.$startBtn, 'click', 'startUpload');
+      this.addListener(this.$cancelBtn, 'click', 'onCancel');
+      this.addListener(this.$file, 'change', 'onFileChange');
+    },
+
+    onFileChange: function () {
+      var file = this.$file[0].files && this.$file[0].files[0];
+
+      if (!file) {
+        return;
+      }
+
+      if (!this.$title.val()) {
+        var name = file.name.replace(/\.[^.]+$/, '');
+        this.$title.val(name);
+      }
+    },
+
+    startUpload: function () {
+      var self = this;
+
+      if (this.busy) {
+        return;
+      }
+
+      var file = this.$file[0].files && this.$file[0].files[0];
+
+      if (!file) {
+        Craft.cp.displayError(Craft.t('polymedia', 'Choose a video file.'));
+        return;
+      }
+
+      if (typeof UpChunk === 'undefined' || !UpChunk.createUpload) {
+        Craft.cp.displayError(Craft.t('polymedia', 'Upload failed.'));
+        return;
+      }
+
+      this.busy = true;
+      this._setUiBusy(true);
+      this._setStatus(Craft.t('polymedia', 'Uploading…'));
+      this.$progress.prop('hidden', false);
+      this._setProgress(0);
+
+      Craft.sendActionRequest('POST', 'polymedia/mux/create-upload', {
+        data: {
+          title: this.$title.val() || '',
+          folderId: this.folderId || '',
+        },
+      })
+        .then(function (response) {
+          var data = response.data || {};
+
+          if (!data.uploadUrl || !data.uploadId) {
+            throw new Error(Craft.t('polymedia', 'Upload failed.'));
+          }
+
+          self.uploadId = data.uploadId;
+          if (data.folderId) {
+            self.folderId = data.folderId;
+          }
+
+          self.upchunk = UpChunk.createUpload({
+            endpoint: data.uploadUrl,
+            file: file,
+            chunkSize: 5120,
+          });
+
+          self.upchunk.on('progress', function (ev) {
+            var pct =
+              typeof ev.detail === 'number'
+                ? ev.detail
+                : (ev.detail && ev.detail.progress) || 0;
+            self._setProgress(pct);
+          });
+
+          self.upchunk.on('error', function (ev) {
+            var msg =
+              (ev.detail && ev.detail.message) ||
+              Craft.t('polymedia', 'Upload failed.');
+            self._fail(msg);
+          });
+
+          self.upchunk.on('success', function () {
+            self._setProgress(100);
+            self._setStatus(Craft.t('polymedia', 'Processing on Mux…'));
+            self._pollStatus();
+          });
+        })
+        .catch(function (error) {
+          var message =
+            (error &&
+              error.response &&
+              error.response.data &&
+              error.response.data.message) ||
+            (error && error.message) ||
+            Craft.t('polymedia', 'Upload failed.');
+          self._fail(message);
+        });
+    },
+
+    _pollStatus: function () {
+      var self = this;
+      var attempts = 0;
+      var maxAttempts = 90;
+
+      var tick = function () {
+        if (!self.busy) {
+          return;
+        }
+
+        attempts += 1;
+
+        Craft.sendActionRequest('GET', 'polymedia/mux/upload-status', {
+          data: { uploadId: self.uploadId },
+        })
+          .then(function (response) {
+            var data = response.data || {};
+
+            if (data.failed) {
+              self._fail(
+                data.message || Craft.t('polymedia', 'Upload failed.')
+              );
+              return;
+            }
+
+            if (data.ready && data.assetId) {
+              self._complete(data.assetId);
+              return;
+            }
+
+            if (attempts >= maxAttempts) {
+              self._fail(Craft.t('polymedia', 'Upload failed.'));
+              return;
+            }
+
+            self.pollTimer = setTimeout(tick, 2000);
+          })
+          .catch(function (error) {
+            if (attempts >= maxAttempts) {
+              var message =
+                (error &&
+                  error.response &&
+                  error.response.data &&
+                  error.response.data.message) ||
+                Craft.t('polymedia', 'Upload failed.');
+              self._fail(message);
+              return;
+            }
+
+            self.pollTimer = setTimeout(tick, 3000);
+          });
+      };
+
+      tick();
+    },
+
+    _complete: function (muxAssetId) {
+      var self = this;
+
+      this._setStatus(Craft.t('polymedia', 'Creating media item…'));
+
+      Craft.sendActionRequest('POST', 'polymedia/mux/complete-upload', {
+        data: {
+          muxAssetId: muxAssetId,
+          uploadId: this.uploadId || '',
+          folderId: this.folderId || '',
+          title: this.$title.val() || '',
+        },
+      })
+        .then(function (response) {
+          var data = response.data || {};
+          var message =
+            data.message || Craft.t('polymedia', 'Mux upload complete.');
+          Craft.cp.displayNotice(message);
+          Craft.Polymedia._refreshIndex(self.assetIndex);
+          self.busy = false;
+          self.hide();
+        })
+        .catch(function (error) {
+          var message =
+            (error &&
+              error.response &&
+              error.response.data &&
+              error.response.data.message) ||
+            Craft.t('polymedia', 'Upload failed.');
+          self._fail(message);
+        });
+    },
+
+    _fail: function (message) {
+      this.busy = false;
+      this._clearTimers();
+      this._abortUpchunk();
+      this._setUiBusy(false);
+      this._setStatus(message);
+      Craft.cp.displayError(message);
+    },
+
+    onCancel: function () {
+      if (this.busy) {
+        this._abortUpchunk();
+        this._clearTimers();
+        this.busy = false;
+      }
+
+      this.hide();
+    },
+
+    onFadeOut: function () {
+      this._clearTimers();
+      this._abortUpchunk();
+      this.base();
+    },
+
+    _abortUpchunk: function () {
+      if (this.upchunk && typeof this.upchunk.abort === 'function') {
+        try {
+          this.upchunk.abort();
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      this.upchunk = null;
+    },
+
+    _clearTimers: function () {
+      if (this.pollTimer) {
+        clearTimeout(this.pollTimer);
+        this.pollTimer = null;
+      }
+    },
+
+    _setUiBusy: function (busy) {
+      this.$startBtn.prop('disabled', busy).toggleClass('loading', busy);
+      this.$title.prop('disabled', busy);
+      this.$file.prop('disabled', busy);
+      this.$cancelBtn.text(
+        busy
+          ? Craft.t('polymedia', 'Cancel')
+          : Craft.t('polymedia', 'Close')
+      );
+    },
+
+    _setProgress: function (pct) {
+      var value = Math.max(0, Math.min(100, Math.round(pct)));
+      this.$progressBar.css('width', value + '%');
+      this.$progress.attr('aria-valuenow', String(value));
+    },
+
+    _setStatus: function (text) {
+      this.$status.text(text || '');
     },
   });
 
