@@ -11,10 +11,7 @@
 
 namespace boccdotdev\polymedia\services;
 
-use boccdotdev\polymedia\db\Table;
 use boccdotdev\polymedia\records\MediaItemRecord;
-use Craft;
-use craft\db\Query;
 use yii\base\Component;
 
 /**
@@ -25,6 +22,16 @@ use yii\base\Component;
  */
 class MediaItems extends Component
 {
+    // Private Properties
+    // =========================================================================
+
+    /**
+     * Per-request cache of media item records keyed by asset ID.
+     *
+     * @var array<int, MediaItemRecord|null>
+     */
+    private array $_byAssetId = [];
+
     // Public Methods
     // =========================================================================
 
@@ -39,7 +46,14 @@ class MediaItems extends Component
      */
     public function getByAssetId(int $assetId): ?MediaItemRecord
     {
-        return MediaItemRecord::findOne(['assetId' => $assetId]);
+        if (array_key_exists($assetId, $this->_byAssetId)) {
+            return $this->_byAssetId[$assetId];
+        }
+
+        $record = MediaItemRecord::findOne(['assetId' => $assetId]);
+        $this->_byAssetId[$assetId] = $record;
+
+        return $record;
     }
 
     /**
@@ -53,7 +67,13 @@ class MediaItems extends Component
      */
     public function getByAssetUid(string $assetUid): ?MediaItemRecord
     {
-        return MediaItemRecord::findOne(['assetUid' => $assetUid]);
+        $record = MediaItemRecord::findOne(['assetUid' => $assetUid]);
+
+        if ($record) {
+            $this->_byAssetId[(int)$record->assetId] = $record;
+        }
+
+        return $record;
     }
 
     /**
@@ -67,7 +87,13 @@ class MediaItems extends Component
      */
     public function save(MediaItemRecord $record): bool
     {
-        return $record->save();
+        $saved = $record->save();
+
+        if ($saved && $record->assetId) {
+            $this->_byAssetId[(int)$record->assetId] = $record;
+        }
+
+        return $saved;
     }
 
     /**
@@ -81,6 +107,8 @@ class MediaItems extends Component
      */
     public function deleteByAssetId(int $assetId): int
     {
+        unset($this->_byAssetId[$assetId]);
+
         return MediaItemRecord::deleteAll(['assetId' => $assetId]);
     }
 
@@ -95,6 +123,10 @@ class MediaItems extends Component
      */
     public function existsForAsset(int $assetId): bool
     {
+        if (array_key_exists($assetId, $this->_byAssetId)) {
+            return $this->_byAssetId[$assetId] !== null;
+        }
+
         return MediaItemRecord::find()->where(['assetId' => $assetId])->exists();
     }
 

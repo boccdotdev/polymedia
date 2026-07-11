@@ -57,8 +57,16 @@
     "config": {
         "allow-plugins": {
             "yiisoft/yii2-composer": true,
-            "craftcms/plugin-installer": true
-        }
+            "craftcms/plugin-installer": true,
+            "phpstan/extension-installer": true
+        },
+        "sort-packages": true
+    },
+    "scripts": {
+        "check-cs": "ecs check --ansi",
+        "fix-cs": "ecs check --ansi --fix",
+        "phpstan": "phpstan analyse --memory-limit=1G",
+        "test": "phpunit"
     },
     "minimum-stability": "dev",
     "prefer-stable": true

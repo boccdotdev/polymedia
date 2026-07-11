@@ -74,6 +74,7 @@ class Install extends Migration
             'width' => $this->integer(),
             'height' => $this->integer(),
             'defaults' => $this->text(),
+            'metadata' => $this->text(),
             'dateCreated' => $this->dateTime()->notNull(),
             'dateUpdated' => $this->dateTime()->notNull(),
             'uid' => $this->uid(),

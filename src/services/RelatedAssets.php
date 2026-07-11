@@ -12,6 +12,7 @@
 namespace boccdotdev\polymedia\services;
 
 use boccdotdev\polymedia\Plugin;
+use boccdotdev\polymedia\records\MediaItemRecord;
 use boccdotdev\polymedia\records\RelatedAssetRecord;
 use Craft;
 use craft\elements\Asset;
@@ -284,6 +285,121 @@ class RelatedAssets extends Component
             return str_starts_with(trim($header), 'WEBVTT');
         } catch (\Throwable) {
             return false;
+        }
+    }
+
+    /**
+     * Attaches or clears the item-level poster for a media item.
+     *
+     * Accepts the raw `polymediaPoster` submission (an asset ID, a single-element
+     * array of one, or empty to clear). Non-image assets and assets the current
+     * user can't view are ignored.
+     *
+     * @param MediaItemRecord $record the media item record
+     * @param mixed $posterIds the submitted poster value
+     *
+     * @author boccdotdev
+     * @since 1.3.0
+     */
+    public function savePoster(MediaItemRecord $record, mixed $posterIds): void
+    {
+        if (is_array($posterIds)) {
+            $posterAssetId = (int)($posterIds[0] ?? 0) ?: null;
+        } else {
+            $posterAssetId = (int)$posterIds ?: null;
+        }
+
+        if ($posterAssetId) {
+            $posterAsset = Craft::$app->getAssets()->getAssetById($posterAssetId);
+
+            if (!$posterAsset || $posterAsset->kind !== 'image') {
+                return;
+            }
+
+            $currentUser = Craft::$app->getUser()->getIdentity();
+
+            if (!$currentUser || !$currentUser->can("viewAssets:{$posterAsset->getVolume()->uid}")) {
+                return;
+            }
+
+            $this->attach(
+                itemId: $record->id,
+                assetId: $posterAssetId,
+                role: 'poster',
+            );
+        } else {
+            $this->clearPoster($record->id);
+        }
+    }
+
+    /**
+     * Reconciles the attached track assets for a role on the current site.
+     *
+     * @param MediaItemRecord $record the media item record
+     * @param string $role one of `captions`, `subtitles`, `descriptions`
+     * @param mixed $assetIds the submitted asset IDs (array or empty to clear)
+     *
+     * @author boccdotdev
+     * @since 1.3.0
+     */
+    public function saveTracks(MediaItemRecord $record, string $role, mixed $assetIds): void
+    {
+        if (!isset(EditorContent::TRACK_ROLES[$role])) {
+            return;
+        }
+
+        $site = Craft::$app->getSites()->getCurrentSite();
+        $submittedIds = array_filter(array_map('intval', (array)$assetIds));
+
+        $existing = $this->getTrackRecords($record->id, $role, $site->id);
+        $existingByAssetId = [];
+        $staleIds = [];
+
+        foreach ($existing as $existingRecord) {
+            $existingByAssetId[$existingRecord->assetId] = $existingRecord;
+
+            if (!in_array($existingRecord->assetId, $submittedIds, true)) {
+                $staleIds[] = $existingRecord->id;
+            }
+        }
+
+        $this->detachMany($staleIds);
+
+        $currentUser = Craft::$app->getUser()->getIdentity();
+        $srclang = explode('-', $site->language)[0] ?: null;
+        $label = $site->getLocale()->getDisplayName();
+        $sortOrder = 0;
+
+        foreach ($submittedIds as $assetId) {
+            $sortOrder++;
+
+            if (isset($existingByAssetId[$assetId])) {
+                continue;
+            }
+
+            $asset = Craft::$app->getAssets()->getAssetById($assetId);
+
+            if (!$asset || $asset->kind !== Asset::KIND_CAPTIONS_SUBTITLES) {
+                continue;
+            }
+
+            if (!$currentUser || !$currentUser->can("viewAssets:{$asset->getVolume()->uid}")) {
+                continue;
+            }
+
+            if (!$this->validateVtt($asset)) {
+                continue;
+            }
+
+            $this->attach(
+                itemId: $record->id,
+                assetId: $assetId,
+                role: $role,
+                siteId: $site->id,
+                srclang: $srclang,
+                label: $label,
+                sortOrder: $sortOrder,
+            );
         }
     }
 

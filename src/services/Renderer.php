@@ -107,7 +107,7 @@ class Renderer extends Component
         }
 
         // Native controls fight Media Chrome's controller UI — omit on player().
-        $mediaAttrs = $this->_buildMediaAttrs($manifest, $settings, $poster, $elementTag, false);
+        $mediaAttrs = $this->_buildMediaAttrs($manifest, $settings, $poster, $elementTag, false, $options);
         $trackHtml = $this->_buildTracksHtml($asset, $options);
 
         $mediaHtml = Html::beginTag($elementTag, $mediaAttrs)
@@ -165,7 +165,7 @@ class Renderer extends Component
         $poster = $this->_resolvePoster($asset, $manifest, $options);
 
         // element() has no media-controller; emit native controls when requested.
-        $mediaAttrs = $this->_buildMediaAttrs($manifest, $settings, $poster, $elementTag, true);
+        $mediaAttrs = $this->_buildMediaAttrs($manifest, $settings, $poster, $elementTag, true, $options);
         unset($mediaAttrs['slot']);
 
         $html = Html::beginTag($elementTag, $mediaAttrs) . Html::endTag($elementTag);
@@ -435,6 +435,7 @@ class Renderer extends Component
         ?string $poster,
         string $elementTag,
         bool $emitControls = false,
+        array $options = [],
     ): array {
         $type = $manifest['type'] ?? '';
         $attrs = ['slot' => 'media'];
@@ -479,6 +480,11 @@ class Renderer extends Component
 
         if ($poster !== null && !in_array($type, self::AUDIO_TYPES, true)) {
             $attrs['poster'] = $poster;
+        }
+
+        // Template-supplied attrs on the media element (not the controller).
+        foreach ($options['mediaAttrs'] ?? [] as $k => $v) {
+            $attrs[$k] = $v;
         }
 
         return $attrs;

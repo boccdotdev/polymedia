@@ -11,8 +11,8 @@
 
 namespace boccdotdev\polymedia\controllers;
 
-use boccdotdev\polymedia\Plugin;
 use boccdotdev\polymedia\models\Settings;
+use boccdotdev\polymedia\Plugin;
 use Craft;
 use craft\elements\Asset;
 use craft\elements\User;
@@ -190,11 +190,7 @@ class MediaItemsController extends Controller
             return;
         }
 
-        $itemFolder = $asset->getFolder();
-
-        if ($itemFolder) {
-            $assets->moveAsset($poster, $itemFolder);
-        }
+        $assets->moveAsset($poster, $asset->getFolder());
     }
 
     /**

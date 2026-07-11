@@ -11,8 +11,8 @@
 
 namespace boccdotdev\polymedia\services;
 
-use Craft;
 use boccdotdev\polymedia\records\FieldSettingsRecord;
+use Craft;
 use craft\helpers\Json;
 use yii\base\Component;
 

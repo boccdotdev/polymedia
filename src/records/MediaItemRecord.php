@@ -29,6 +29,7 @@ use craft\db\ActiveRecord;
  * @property ?int $width
  * @property ?int $height
  * @property ?string $defaults
+ * @property ?string $metadata JSON object (thumbnail, hints, provider extras)
  * @property string $dateCreated
  * @property string $dateUpdated
  * @property string $uid

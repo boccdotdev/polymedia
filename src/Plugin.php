@@ -13,12 +13,13 @@ namespace boccdotdev\polymedia;
 
 use boccdotdev\polymedia\behaviors\PolymediaAssetBehavior;
 use boccdotdev\polymedia\behaviors\PolymediaAssetFieldBehavior;
+use boccdotdev\polymedia\fields\PolymediaField;
 use boccdotdev\polymedia\models\DetectionResult;
 use boccdotdev\polymedia\models\PlayerSettings;
 use boccdotdev\polymedia\models\Settings;
 use boccdotdev\polymedia\records\MediaItemRecord;
-use boccdotdev\polymedia\fields\PolymediaField;
 use boccdotdev\polymedia\services\AssetFieldSettings;
+use boccdotdev\polymedia\services\EditorContent;
 use boccdotdev\polymedia\services\ManifestWriter;
 use boccdotdev\polymedia\services\MediaItems;
 use boccdotdev\polymedia\services\ProviderFilter;
@@ -67,6 +68,7 @@ use yii\base\Event;
  * @property-read Renderer $renderer
  * @property-read AssetFieldSettings $assetFieldSettings
  * @property-read ProviderFilter $providerFilter
+ * @property-read EditorContent $editorContent
  *
  * @author boccdotdev
  * @since 1.0.0
@@ -79,7 +81,7 @@ class Plugin extends BasePlugin
     /**
      * @var string
      */
-    public string $schemaVersion = '1.1.0';
+    public string $schemaVersion = '1.2.0';
 
     /**
      * @var bool
@@ -90,22 +92,6 @@ class Plugin extends BasePlugin
      * @var bool
      */
     public bool $hasCpSection = false;
-
-    // Constants
-    // =========================================================================
-
-    /**
-     * Track roles attachable from the asset editor, in display order.
-     * Keys are roles; values are the untranslated field labels. Kept in sync
-     * with the roles emitted by {@see Renderer::_buildTracksHtml()}.
-     *
-     * @var array<string,string>
-     */
-    private const TRACK_ROLES = [
-        'captions' => 'Captions',
-        'subtitles' => 'Subtitles',
-        'descriptions' => 'Descriptions',
-    ];
 
     // Public Methods
     // =========================================================================
@@ -132,6 +118,7 @@ class Plugin extends BasePlugin
             'renderer' => Renderer::class,
             'assetFieldSettings' => AssetFieldSettings::class,
             'providerFilter' => ProviderFilter::class,
+            'editorContent' => EditorContent::class,
         ]);
 
         $this->_registerFileKind();
@@ -253,6 +240,19 @@ class Plugin extends BasePlugin
         return $this->get('providerFilter');
     }
 
+    /**
+     * Returns the editor content service.
+     *
+     * @return EditorContent
+     *
+     * @author boccdotdev
+     * @since 1.3.0
+     */
+    public function getEditorContent(): EditorContent
+    {
+        return $this->get('editorContent');
+    }
+
     // Protected Methods
     // =========================================================================
 
@@ -262,6 +262,17 @@ class Plugin extends BasePlugin
     protected function createSettingsModel(): ?Model
     {
         return new Settings();
+    }
+
+    /**
+     * @inheritdoc
+     */
+    public function getSettings(): Settings
+    {
+        /** @var Settings $settings */
+        $settings = parent::getSettings();
+
+        return $settings;
     }
 
     /**
@@ -408,8 +419,7 @@ class Plugin extends BasePlugin
                 $e->html = match ($e->attribute) {
                     'polymediaType' => Html::encode(ucfirst($record->type)),
                     'polymediaProvider' => Html::encode(parse_url($record->url, PHP_URL_HOST) ?: ''),
-                    'polymediaDuration' => $this->_formatDuration($record->duration),
-                    default => '',
+                    'polymediaDuration' => $this->getEditorContent()->formatDuration($record->duration),
                 };
                 $e->handled = true;
             },
@@ -426,7 +436,6 @@ class Plugin extends BasePlugin
                 ];
             },
         );
-
     }
 
     /**
@@ -526,7 +535,11 @@ class Plugin extends BasePlugin
                 $record->duration = (int)$data['duration'];
             }
 
-            $record->save();
+            if (isset($data['metadata']) && is_array($data['metadata'])) {
+                $record->metadata = Json::encode($data['metadata']);
+            }
+
+            $this->getMediaItems()->save($record);
 
             Craft::info(
                 "Polymedia: reconciled asset #{$asset->id} as {$detection->type}.",
@@ -642,10 +655,6 @@ class Plugin extends BasePlugin
     /**
      * Attaches or clears the item-level poster for a media item.
      *
-     * Accepts the raw `polymediaPoster` submission (an asset ID, a single-element
-     * array of one, or empty to clear). Non-image assets and assets the current
-     * user can't view are ignored.
-     *
      * @param MediaItemRecord $record the media item record
      * @param mixed $posterIds the submitted poster value
      *
@@ -654,34 +663,7 @@ class Plugin extends BasePlugin
      */
     public function savePoster(MediaItemRecord $record, mixed $posterIds): void
     {
-        if (is_array($posterIds)) {
-            $posterAssetId = (int)($posterIds[0] ?? 0) ?: null;
-        } else {
-            $posterAssetId = (int)$posterIds ?: null;
-        }
-        $relatedAssets = $this->getRelatedAssets();
-
-        if ($posterAssetId) {
-            $posterAsset = Craft::$app->getAssets()->getAssetById($posterAssetId);
-
-            if (!$posterAsset || $posterAsset->kind !== 'image') {
-                return;
-            }
-
-            $currentUser = Craft::$app->getUser()->getIdentity();
-
-            if (!$currentUser || !$currentUser->can("viewAssets:{$posterAsset->getVolume()->uid}")) {
-                return;
-            }
-
-            $relatedAssets->attach(
-                itemId: $record->id,
-                assetId: $posterAssetId,
-                role: 'poster',
-            );
-        } else {
-            $relatedAssets->clearPoster($record->id);
-        }
+        $this->getRelatedAssets()->savePoster($record, $posterIds);
     }
 
     /**
@@ -693,13 +675,13 @@ class Plugin extends BasePlugin
      */
     private function _saveTracksFromRequest(MediaItemRecord $record): void
     {
-        if (!$this->_supportsTracks($record)) {
+        if (!$this->getEditorContent()->supportsTracks($record)) {
             return;
         }
 
         $request = Craft::$app->getRequest();
 
-        foreach (array_keys(self::TRACK_ROLES) as $role) {
+        foreach (array_keys(EditorContent::TRACK_ROLES) as $role) {
             $assetIds = $request->getBodyParam('polymedia' . ucfirst($role));
 
             if ($assetIds === null) {
@@ -713,11 +695,6 @@ class Plugin extends BasePlugin
     /**
      * Reconciles the attached track assets for a role on the current site.
      *
-     * Attaches any newly selected assets and detaches ones that were removed,
-     * scoped to the current CP site so other sites' tracks are preserved.
-     * `srclang` and `label` are derived from the current site. Non-WebVTT
-     * assets and assets the user can't view are skipped.
-     *
      * @param MediaItemRecord $record the media item record
      * @param string $role one of `captions`, `subtitles`, `descriptions`
      * @param mixed $assetIds the submitted asset IDs (array or empty to clear)
@@ -727,64 +704,7 @@ class Plugin extends BasePlugin
      */
     public function saveTracks(MediaItemRecord $record, string $role, mixed $assetIds): void
     {
-        if (!isset(self::TRACK_ROLES[$role])) {
-            return;
-        }
-
-        $site = Craft::$app->getSites()->getCurrentSite();
-        $submittedIds = array_filter(array_map('intval', (array)$assetIds));
-        $relatedAssets = $this->getRelatedAssets();
-
-        $existing = $relatedAssets->getTrackRecords($record->id, $role, $site->id);
-        $existingByAssetId = [];
-        $staleIds = [];
-
-        foreach ($existing as $existingRecord) {
-            $existingByAssetId[$existingRecord->assetId] = $existingRecord;
-
-            if (!in_array($existingRecord->assetId, $submittedIds, true)) {
-                $staleIds[] = $existingRecord->id;
-            }
-        }
-
-        $relatedAssets->detachMany($staleIds);
-
-        $currentUser = Craft::$app->getUser()->getIdentity();
-        $srclang = explode('-', $site->language)[0] ?: null;
-        $label = $site->getLocale()->getDisplayName();
-        $sortOrder = 0;
-
-        foreach ($submittedIds as $assetId) {
-            $sortOrder++;
-
-            if (isset($existingByAssetId[$assetId])) {
-                continue;
-            }
-
-            $asset = Craft::$app->getAssets()->getAssetById($assetId);
-
-            if (!$asset || $asset->kind !== Asset::KIND_CAPTIONS_SUBTITLES) {
-                continue;
-            }
-
-            if (!$currentUser || !$currentUser->can("viewAssets:{$asset->getVolume()->uid}")) {
-                continue;
-            }
-
-            if (!$relatedAssets->validateVtt($asset)) {
-                continue;
-            }
-
-            $relatedAssets->attach(
-                itemId: $record->id,
-                assetId: $assetId,
-                role: $role,
-                siteId: $site->id,
-                srclang: $srclang,
-                label: $label,
-                sortOrder: $sortOrder,
-            );
-        }
+        $this->getRelatedAssets()->saveTracks($record, $role, $assetIds);
     }
 
     /**
@@ -806,7 +726,7 @@ class Plugin extends BasePlugin
                     return;
                 }
 
-                $fields = $this->_renderMediaFields($record, $event->static, $event->element);
+                $fields = $this->getEditorContent()->renderMediaFields($record, $event->static, $event->element);
                 $pos = strrpos($event->html, '</div>');
 
                 if ($pos !== false) {
@@ -821,107 +741,7 @@ class Plugin extends BasePlugin
     }
 
     /**
-     * Renders the media metadata and poster fields for the editor.
-     *
-     * @param MediaItemRecord $record
-     * @param bool $static
-     * @param Asset $asset the `.pmedia` asset being edited
-     * @return string
-     */
-    private function _renderMediaFields(MediaItemRecord $record, bool $static, Asset $asset): string
-    {
-        $providerTypes = $this->getUrlDetector()->getProviderTypes();
-        $typeOptions = [];
-
-        foreach ($providerTypes as $type) {
-            $typeOptions[] = ['label' => ucfirst($type), 'value' => $type];
-        }
-
-        $html = '';
-
-        $html .= Cp::textFieldHtml([
-            'label' => Craft::t('polymedia', 'Media URL'),
-            'id' => 'polymedia-url',
-            'name' => 'polymediaUrl',
-            'value' => $record->url,
-            'disabled' => $static,
-        ]);
-
-        $html .= Cp::selectFieldHtml([
-            'label' => Craft::t('polymedia', 'Media Type'),
-            'id' => 'polymedia-type',
-            'name' => 'polymediaType',
-            'value' => $record->type,
-            'options' => $typeOptions,
-            'disabled' => $static,
-        ]);
-
-        if ($record->providerId) {
-            $html .= Cp::textFieldHtml([
-                'label' => Craft::t('polymedia', 'Provider ID'),
-                'id' => 'polymedia-provider-id',
-                'name' => 'polymediaProviderId',
-                'value' => $record->providerId,
-                'disabled' => true,
-                'readonly' => true,
-            ]);
-        }
-
-        if ($record->duration) {
-            $html .= Html::beginTag('div', ['class' => 'data', 'style' => 'margin-bottom: 14px;']);
-            $html .= Html::tag('div', Craft::t('polymedia', 'Duration') . ': '
-                . Html::encode($this->_formatDuration((int)$record->duration)), ['class' => 'light']);
-            $html .= Html::endTag('div');
-        }
-
-        $posterAsset = $this->getRelatedAssets()->getPoster($record->id);
-        $elements = $posterAsset ? [$posterAsset] : [];
-
-        $html .= Cp::elementSelectFieldHtml(
-            $this->getPosterFieldConfig($asset->getFolder(), $elements, $static),
-        );
-
-        if ($this->_supportsTracks($record)) {
-            $folder = $asset->getFolder();
-            $siteId = Craft::$app->getSites()->getCurrentSite()->id;
-
-            foreach (array_keys(self::TRACK_ROLES) as $role) {
-                $trackAssets = $this->getRelatedAssets()->resolveTracks($record->id, $role, $siteId);
-                $html .= Cp::elementSelectFieldHtml(
-                    $this->getTrackFieldConfig($role, $folder, $trackAssets, $static),
-                );
-            }
-        }
-
-        return $html;
-    }
-
-    /**
-     * Whether the media type renders as a video element and so accepts text
-     * tracks. Audio-only providers (Spotify, raw audio) don't take `<track>`.
-     *
-     * @param MediaItemRecord $record the media item
-     * @return bool
-     */
-    private function _supportsTracks(MediaItemRecord $record): bool
-    {
-        return str_contains((string)$record->element, 'video');
-    }
-
-    /**
-     * Builds the poster image picker config: an image-only asset select that
-     * allows inline uploads, with browsing and uploads defaulting to the given
-     * folder.
-     *
-     * Shared by the asset edit slideout and the "Add media URL" create screen so
-     * a poster can be set in either place, and so uploaded posters land beside
-     * the `.pmedia` file rather than the user's temp folder.
-     *
-     * Returned as a config (rather than rendered HTML) so callers in a
-     * namespaced control-panel screen can render it via the `forms` macros
-     * inside the active namespace. Pre-rendering here would namespace the
-     * field markup but not the input's init JS, leaving the two ids out of
-     * sync and the picker dead.
+     * Builds the poster image picker config.
      *
      * @param VolumeFolder|null $folder the folder posters should default to
      * @param Asset[] $elements the currently selected poster (zero or one)
@@ -933,40 +753,11 @@ class Plugin extends BasePlugin
      */
     public function getPosterFieldConfig(?VolumeFolder $folder, array $elements = [], bool $static = false): array
     {
-        ['jsClass' => $jsClass, 'jsSettings' => $jsSettings, 'canUpload' => $canUpload] =
-            $this->_uploadJsConfig($folder, $static);
-
-        return [
-            'label' => Craft::t('polymedia', 'Poster Image'),
-            'instructions' => $canUpload
-                ? Craft::t('polymedia', 'Select or upload an image to use as the poster/thumbnail for this media item.')
-                : Craft::t('polymedia', 'Select an image to use as the poster/thumbnail for this media item.'),
-            'id' => 'polymedia-poster',
-            'name' => 'polymediaPoster',
-            'elementType' => Asset::class,
-            'jsClass' => $jsClass,
-            'sources' => '*',
-            'criteria' => [
-                'kind' => ['image'],
-                'siteId' => Craft::$app->getSites()->getCurrentSite()->id,
-            ],
-            'single' => true,
-            'limit' => 1,
-            'elements' => $elements,
-            'disabled' => $static,
-            'jsSettings' => $jsSettings,
-        ];
+        return $this->getEditorContent()->getPosterFieldConfig($folder, $elements, $static);
     }
 
     /**
-     * Builds a caption/subtitle/description track picker config for a single
-     * role: a multi-select, `captionsSubtitles`-kind asset select that allows
-     * inline uploads pinned to the given folder.
-     *
-     * Tracks are scoped to the current CP site — the picker shows the tracks
-     * already attached for this role + site, and saving reconciles only that
-     * site's rows (see {@see saveTracks()}). Per-row `srclang`/`label` overrides
-     * are derived from the site on save rather than edited here.
+     * Builds a caption/subtitle/description track picker config for a single role.
      *
      * @param string $role one of `captions`, `subtitles`, `descriptions`
      * @param VolumeFolder|null $folder the folder uploads should default to
@@ -979,89 +770,7 @@ class Plugin extends BasePlugin
      */
     public function getTrackFieldConfig(string $role, ?VolumeFolder $folder, array $elements = [], bool $static = false): array
     {
-        ['jsClass' => $jsClass, 'jsSettings' => $jsSettings, 'canUpload' => $canUpload] =
-            $this->_uploadJsConfig($folder, $static);
-
-        $label = Craft::t('polymedia', self::TRACK_ROLES[$role] ?? ucfirst($role));
-
-        return [
-            'label' => $label,
-            'instructions' => $canUpload
-                ? Craft::t('polymedia', 'Select or upload WebVTT files for the current site.')
-                : Craft::t('polymedia', 'Select WebVTT files for the current site.'),
-            'id' => "polymedia-{$role}",
-            'name' => "polymedia" . ucfirst($role),
-            'elementType' => Asset::class,
-            'jsClass' => $jsClass,
-            'sources' => '*',
-            'criteria' => [
-                'kind' => [Asset::KIND_CAPTIONS_SUBTITLES],
-                'siteId' => Craft::$app->getSites()->getCurrentSite()->id,
-            ],
-            'elements' => $elements,
-            'disabled' => $static,
-            'jsSettings' => $jsSettings,
-        ];
-    }
-
-    /**
-     * Resolves the inline-upload JS class and settings for an asset select
-     * field, pinning uploads to the given folder when the user can save there.
-     *
-     * @param VolumeFolder|null $folder the folder uploads should land in
-     * @param bool $static whether the field is read-only
-     * @return array{jsClass:string,jsSettings:array,canUpload:bool}
-     */
-    private function _uploadJsConfig(?VolumeFolder $folder, bool $static): array
-    {
-        $canUpload = false;
-        $jsClass = 'Craft.BaseElementSelectInput';
-        $jsSettings = [];
-
-        if (!$static && $folder && $folder->volumeId) {
-            $volume = $folder->getVolume();
-            $currentUser = Craft::$app->getUser()->getIdentity();
-
-            try {
-                $fsType = get_class($volume->getFs());
-            } catch (\Throwable) {
-                $fsType = null;
-            }
-
-            $canUpload = $fsType !== null
-                && $currentUser
-                && $currentUser->can("saveAssets:{$volume->uid}");
-
-            if ($canUpload) {
-                $jsClass = 'Craft.PolymediaPosterInput';
-                $jsSettings = [
-                    'canUpload' => true,
-                    'fsType' => $fsType,
-                    'folderId' => (int)$folder->id,
-                    'modalSettings' => [
-                        'defaultSource' => $this->_folderSourceKey($folder),
-                    ],
-                ];
-            }
-        }
-
-        return ['jsClass' => $jsClass, 'jsSettings' => $jsSettings, 'canUpload' => $canUpload];
-    }
-
-    /**
-     * Returns the asset index source key for a folder (e.g. `volume:UID` for a
-     * volume root, or `folder:UID` for a subfolder).
-     *
-     * @param VolumeFolder $folder
-     * @return string
-     */
-    private function _folderSourceKey(VolumeFolder $folder): string
-    {
-        if ($folder->parentId) {
-            return "folder:{$folder->uid}";
-        }
-
-        return "volume:{$folder->getVolume()->uid}";
+        return $this->getEditorContent()->getTrackFieldConfig($role, $folder, $elements, $static);
     }
 
     /**
@@ -1356,28 +1065,5 @@ JS);
                 }
             },
         );
-    }
-
-    /**
-     * Formats a duration in seconds as `H:MM:SS` or `M:SS`.
-     *
-     * @param int|null $seconds the duration in seconds
-     * @return string
-     */
-    private function _formatDuration(?int $seconds): string
-    {
-        if ($seconds === null) {
-            return '';
-        }
-
-        $hours = intdiv($seconds, 3600);
-        $minutes = intdiv($seconds % 3600, 60);
-        $secs = $seconds % 60;
-
-        if ($hours > 0) {
-            return sprintf('%d:%02d:%02d', $hours, $minutes, $secs);
-        }
-
-        return sprintf('%d:%02d', $minutes, $secs);
     }
 }

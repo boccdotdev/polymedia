@@ -33,7 +33,13 @@ class UrlDetector extends Component
     // =========================================================================
 
     /**
-     * @var array<int, array{regex: string, type: string, element: string, idExtractor: ?callable, hints: ?callable}>
+     * @var list<array{
+     *     regex: string,
+     *     type: string,
+     *     element: string,
+     *     idExtractor?: callable(array): void,
+     *     hints?: callable(array): array
+     * }>
      */
     private const RULES = [
         // Mux — BEFORE HLS (stream.mux.com m3u8 URLs)

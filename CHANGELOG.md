@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.3.0 - 2026-07-11
+
+### Added
+- `metadata` column on `polymedia_items` so manifest extras (thumbnail URL, provider hints) live in the DB; enables DB-first `data()` / `ManifestWriter::read()` without a filesystem round-trip per render.
+- Lazy metadata backfill when reading older rows that only have the `.pmedia` file populated.
+- `options.mediaAttrs` on `player()` / `element()` to pass attributes through to the inner media element (`title`, `referrerpolicy`, etc.). `attrs` continues to target `<media-controller>` only.
+- `EditorContent` service for CP editor fields and element-select configs (extracted from `Plugin`).
+- Composer scripts: `check-cs`, `fix-cs`, `phpstan`, `test`.
+- Easy Coding Standard (`ecs.php`) and PHPStan (`phpstan.neon`, level 5) config.
+- GitHub Actions CI on PHP 8.2 and 8.3 (phpunit + ECS + PHPStan).
+
+### Changed
+- `MediaItems::getByAssetId()` is memoized per request; cache invalidated on `save()` / `deleteByAssetId()`.
+- `ManifestWriter::read()` prefers the DB record; filesystem is fallback + backfill path.
+- `savePoster()` / `saveTracks()` logic lives on `RelatedAssets`; `Plugin` keeps thin public proxies for BC.
+- `Plugin.php` slimmed (~1,370 → ~1,070 lines) via `EditorContent` extraction.
+- Schema version `1.1.0` → `1.2.0` (run `php craft up` / plugin migrate).
+
 ## 1.2.2 - 2026-07-11
 
 ### Fixed

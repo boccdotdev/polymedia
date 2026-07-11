@@ -121,7 +121,7 @@ class RendererScriptsTest extends TestCase
 
         // player() must pass false so native controls never land under media-controller
         $this->assertMatchesRegularExpression(
-            '/\/\/ Native controls fight Media Chrome.*?_buildMediaAttrs\(\$manifest, \$settings, \$poster, \$elementTag, false\)/s',
+            '/\/\/ Native controls fight Media Chrome.*?_buildMediaAttrs\(\$manifest, \$settings, \$poster, \$elementTag, false, \$options\)/s',
             $source,
         );
     }
@@ -131,10 +131,11 @@ class RendererScriptsTest extends TestCase
         $source = file_get_contents(__DIR__ . '/../../src/services/Renderer.php');
 
         // element() opts in; player() opts out
-        $this->assertStringContainsString('_buildMediaAttrs($manifest, $settings, $poster, $elementTag, true)', $source);
-        $this->assertStringContainsString('_buildMediaAttrs($manifest, $settings, $poster, $elementTag, false)', $source);
+        $this->assertStringContainsString('_buildMediaAttrs($manifest, $settings, $poster, $elementTag, true, $options)', $source);
+        $this->assertStringContainsString('_buildMediaAttrs($manifest, $settings, $poster, $elementTag, false, $options)', $source);
         $this->assertStringContainsString('if ($emitControls && $settings->controls)', $source);
         $this->assertStringContainsString("\$attrs['controls'] = true", $source);
+        $this->assertStringContainsString("\$options['mediaAttrs']", $source);
     }
 
     public function testScriptsParsesEnvVars(): void

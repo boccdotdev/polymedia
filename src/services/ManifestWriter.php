@@ -94,18 +94,55 @@ class ManifestWriter extends Component
     }
 
     /**
-     * Reads and parses the manifest JSON from a `.pmedia` asset.
+     * Returns manifest data for a `.pmedia` asset.
      *
-     * Falls back to the DB record if the file is missing or invalid.
+     * Prefers the DB record (including `metadata`) so S3/cloud volumes avoid a
+     * filesystem round-trip per render. Falls back to reading the file, then
+     * backfills the record metadata when possible.
      *
      * @param Asset $asset the `.pmedia` asset
      * @return array the manifest data
-     * @throws \Throwable if the filesystem read fails and no DB record exists
+     * @throws \Throwable if neither the DB record nor the filesystem has data
      *
      * @author boccdotdev
      * @since 1.0.0
      */
     public function read(Asset $asset): array
+    {
+        $mediaItems = Plugin::getInstance()->getMediaItems();
+        $record = $mediaItems->getByAssetId((int)$asset->id);
+
+        if ($record) {
+            // Lazy-backfill metadata for rows created before the column existed.
+            if ($record->metadata === null || $record->metadata === '') {
+                $fromFs = $this->_readFilesystemManifest($asset);
+
+                if ($fromFs !== null) {
+                    $this->backfillRecordFromManifest($record, $fromFs);
+
+                    return $this->_recordToManifest($record);
+                }
+            }
+
+            return $this->_recordToManifest($record);
+        }
+
+        $fromFs = $this->_readFilesystemManifest($asset);
+
+        if ($fromFs !== null) {
+            return $fromFs;
+        }
+
+        throw new InvalidArgumentException("No manifest data found for asset #{$asset->id}");
+    }
+
+    /**
+     * Reads and decodes the `.pmedia` file from the asset volume, or null on failure.
+     *
+     * @param Asset $asset the polymedia asset
+     * @return array|null
+     */
+    private function _readFilesystemManifest(Asset $asset): ?array
     {
         try {
             $volume = $asset->getVolume();
@@ -117,16 +154,10 @@ class ManifestWriter extends Component
                 return $data;
             }
         } catch (\Throwable) {
-            // Fall through to DB mirror
+            return null;
         }
 
-        $record = Plugin::getInstance()->mediaItems->getByAssetId($asset->id);
-
-        if (!$record) {
-            throw new InvalidArgumentException("No manifest data found for asset #{$asset->id}");
-        }
-
-        return $this->_recordToManifest($record);
+        return null;
     }
 
     /**
@@ -142,14 +173,14 @@ class ManifestWriter extends Component
     public function update(Asset $asset, array $changes): void
     {
         $current = $this->read($asset);
-        $updated = array_merge($current, $changes);
+        $updated = array_replace_recursive($current, $changes);
         $json = Json::encode($updated, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 
         $volume = $asset->getVolume();
         $fs = $volume->getFs();
         $fs->write($asset->getPath(), $json);
 
-        $record = Plugin::getInstance()->mediaItems->getByAssetId($asset->id);
+        $record = Plugin::getInstance()->getMediaItems()->getByAssetId((int)$asset->id);
 
         if ($record) {
             if (isset($changes['title'])) {
@@ -158,12 +189,23 @@ class ManifestWriter extends Component
             if (isset($changes['url'])) {
                 $record->url = $changes['url'];
             }
+            if (isset($changes['type'])) {
+                $record->type = $changes['type'];
+            }
+            if (isset($changes['providerId'])) {
+                $record->providerId = $changes['providerId'];
+            }
             if (isset($changes['defaults'])) {
                 $record->defaults = is_string($changes['defaults'])
                     ? $changes['defaults']
                     : Json::encode($changes['defaults']);
             }
-            $record->save();
+            if (array_key_exists('metadata', $updated)) {
+                $record->metadata = is_string($updated['metadata'])
+                    ? $updated['metadata']
+                    : Json::encode($updated['metadata'] ?? []);
+            }
+            Plugin::getInstance()->getMediaItems()->save($record);
         }
     }
 
@@ -309,11 +351,14 @@ class ManifestWriter extends Component
         string $title,
         ?string $derivedThumbnail,
     ): void {
-        if (Plugin::getInstance()->getMediaItems()->existsForAsset($asset->id)) {
+        $mediaItems = Plugin::getInstance()->getMediaItems();
+
+        if ($mediaItems->existsForAsset((int)$asset->id)) {
             return;
         }
 
         $defaults = new PlayerSettings();
+        $metadata = $this->_buildMetadata($detection, $derivedThumbnail);
 
         $record = new MediaItemRecord();
         $record->assetId = $asset->id;
@@ -324,7 +369,30 @@ class ManifestWriter extends Component
         $record->element = $detection->element;
         $record->title = $title;
         $record->defaults = Json::encode($defaults->toArray());
-        $record->save();
+        $record->metadata = $metadata !== [] ? Json::encode($metadata) : null;
+        $mediaItems->save($record);
+    }
+
+    /**
+     * Builds the metadata object stored on the record and in the manifest file.
+     *
+     * @param DetectionResult $detection the detection result
+     * @param ?string $derivedThumbnail the derived thumbnail URL
+     * @return array
+     */
+    private function _buildMetadata(DetectionResult $detection, ?string $derivedThumbnail): array
+    {
+        $metadata = [];
+
+        if ($derivedThumbnail !== null) {
+            $metadata['thumbnail'] = $derivedThumbnail;
+        }
+
+        if (!empty($detection->hints)) {
+            $metadata['hints'] = $detection->hints;
+        }
+
+        return $metadata;
     }
 
     /**
@@ -341,12 +409,53 @@ class ManifestWriter extends Component
             'url' => $record->url,
             'title' => $record->title,
             'providerId' => $record->providerId,
+            'element' => $record->element,
         ];
 
         if ($record->duration !== null) {
             $manifest['duration'] = (int)$record->duration;
         }
 
+        if ($record->width !== null) {
+            $manifest['width'] = (int)$record->width;
+        }
+
+        if ($record->height !== null) {
+            $manifest['height'] = (int)$record->height;
+        }
+
+        $metadata = $record->metadata ? Json::decodeIfJson($record->metadata) : null;
+
+        if (is_array($metadata) && $metadata !== []) {
+            $manifest['metadata'] = $metadata;
+        }
+
         return $manifest;
+    }
+
+    /**
+     * Backfills `metadata` (and related columns) on a record from a full
+     * filesystem manifest array. Used when older rows predate the metadata
+     * column or were reconciled without metadata.
+     *
+     * @param MediaItemRecord $record the record to update
+     * @param array $manifest the filesystem manifest
+     */
+    public function backfillRecordFromManifest(MediaItemRecord $record, array $manifest): void
+    {
+        $dirty = false;
+
+        if (isset($manifest['metadata']) && is_array($manifest['metadata'])) {
+            $encoded = Json::encode($manifest['metadata']);
+
+            if ($record->metadata !== $encoded) {
+                $record->metadata = $encoded;
+                $dirty = true;
+            }
+        }
+
+        if ($dirty) {
+            Plugin::getInstance()->getMediaItems()->save($record);
+        }
     }
 }
