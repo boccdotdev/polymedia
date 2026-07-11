@@ -46,44 +46,31 @@
         return;
       }
 
+      // Single disclosure: Add media → From URL / Mux browse / Mux upload.
+      // Craft’s “Upload files” stays separate (volume file upload).
+      // Items are built via Garnish.DisclosureMenu#addItem so activate handlers
+      // are wired the same way as native CP menus (delegated activate fails).
+      var menuId =
+        'polymedia-add-media-' + Math.floor(Math.random() * 1000000);
+
       var $btn = $(
-        '<button type="button" class="btn polymedia-add-btn" data-icon="plus">' +
-          Craft.t('polymedia', 'Add media URL') +
+        '<button type="button" class="btn menubtn add icon polymedia-add-media-btn" ' +
+          'data-disclosure-trigger aria-controls="' +
+          menuId +
+          '" aria-haspopup="true">' +
+          Craft.escapeHtml(Craft.t('polymedia', 'Add media')) +
           '</button>'
       );
 
-      var $muxBrowseBtn = null;
-      var $muxUploadBtn = null;
+      var $menu = $(
+        '<div id="' +
+          menuId +
+          '" class="menu menu--disclosure"><ul></ul></div>'
+      );
 
-      if (Craft.Polymedia.muxEnabled) {
-        $muxBrowseBtn = $(
-          '<button type="button" class="btn polymedia-mux-browse-btn">' +
-            Craft.t('polymedia', 'Browse Mux library') +
-            '</button>'
-        );
-        $muxUploadBtn = $(
-          '<button type="button" class="btn polymedia-mux-upload-btn">' +
-            Craft.t('polymedia', 'Upload to Mux') +
-            '</button>'
-        );
-      }
-
-      var placeMuxButtons = function ($after) {
-        if ($muxBrowseBtn) {
-          $after.after($muxBrowseBtn);
-          $after = $muxBrowseBtn;
-        }
-        if ($muxUploadBtn) {
-          $after.after($muxUploadBtn);
-        }
-      };
-
-      if (assetIndex.settings && assetIndex.settings.context === 'index') {
-        // Standalone Assets index: sit just before the "Upload files" button.
-        // Craft re-creates that button on every source change, so (re)place
-        // ours relative to the current one each time to keep the order stable:
-        // [Add media URL] [Browse Mux] [Upload to Mux] [Upload files]
-        var place = function () {
+      var place = function () {
+        if (assetIndex.settings && assetIndex.settings.context === 'index') {
+          // Assets index: immediately before Craft’s Upload files button.
           var $upload = assetIndex.$uploadButton;
 
           if ($upload && $upload.length) {
@@ -91,52 +78,99 @@
           } else if (!$btn.parent().length) {
             assetIndex.addButton($btn);
           }
-
-          placeMuxButtons($btn);
-        };
-
-        place();
-        assetIndex.on('selectSource', place);
-      } else {
-        // Selection modal: sit in the toolbar beside its upload button.
-        var $toolbar = assetIndex.$toolbar;
-
-        if (!$toolbar || !$toolbar.length) {
-          return;
-        }
-
-        var $uploadBtn = $toolbar.find('.btn[data-action="upload"]');
-
-        if (!$uploadBtn.length) {
-          $uploadBtn = $toolbar.find('.btn.submit').first();
-        }
-
-        if ($uploadBtn.length) {
-          $uploadBtn.after($btn);
         } else {
-          $toolbar.append($btn);
+          // Field selection modal toolbar.
+          var $toolbar = assetIndex.$toolbar;
+
+          if (!$toolbar || !$toolbar.length) {
+            return;
+          }
+
+          if (!$btn.parent().length) {
+            var $uploadBtn = $toolbar.find('.btn[data-action="upload"]');
+
+            if (!$uploadBtn.length) {
+              $uploadBtn = $toolbar.find('.btn.submit').first();
+            }
+
+            if ($uploadBtn.length) {
+              $uploadBtn.before($btn);
+            } else {
+              $toolbar.append($btn);
+            }
+          }
         }
 
-        placeMuxButtons($btn);
+        // Menu lives on body once DisclosureMenu inits; keep a sibling for first init.
+        if (!$menu.data('disclosureMenu') && !$menu.parent().length) {
+          $btn.after($menu);
+          $btn.disclosureMenu();
+          Craft.Polymedia._populateAddMediaMenu($menu, assetIndex);
+        }
+      };
+
+      place();
+
+      if (assetIndex.settings && assetIndex.settings.context === 'index') {
+        // Craft rebuilds the upload button on source change — re-place ours.
+        assetIndex.on('selectSource', place);
       }
 
       assetIndex._polymediaBtnInjected = true;
+    },
 
-      $btn.on('click', function () {
-        Craft.Polymedia.openSlideout(assetIndex);
+    /**
+     * Fills the Add media disclosure with native DisclosureMenu items.
+     *
+     * @param {jQuery} $menu
+     * @param {Craft.AssetIndex} assetIndex
+     */
+    _populateAddMediaMenu: function ($menu, assetIndex) {
+      var disclosure = $menu.data('disclosureMenu');
+
+      if (!disclosure || typeof disclosure.addItem !== 'function') {
+        return;
+      }
+
+      // Empty the placeholder list before adding wired items.
+      $menu.children('ul').empty();
+
+      disclosure.addItem({
+        label: Craft.t('polymedia', 'From URL'),
+        description: Craft.t(
+          'polymedia',
+          'Paste a YouTube, Vimeo, Mux, HLS, or other media URL'
+        ),
+        onActivate: function () {
+          Craft.Polymedia.openSlideout(assetIndex);
+        },
       });
 
-      if ($muxBrowseBtn) {
-        $muxBrowseBtn.on('click', function () {
-          Craft.Polymedia.openMuxBrowse(assetIndex);
-        });
+      if (!Craft.Polymedia.muxEnabled) {
+        return;
       }
 
-      if ($muxUploadBtn) {
-        $muxUploadBtn.on('click', function () {
+      disclosure.addItem({
+        label: Craft.t('polymedia', 'Browse Mux library'),
+        description: Craft.t(
+          'polymedia',
+          'Import a video already in your Mux account'
+        ),
+        onActivate: function () {
+          Craft.Polymedia.openMuxBrowse(assetIndex);
+        },
+      });
+
+      disclosure.addItem({
+        label: Craft.t('polymedia', 'Upload to Mux'),
+        description: Craft.t(
+          'polymedia',
+          'Upload a video file directly to Mux'
+        ),
+        onActivate: function () {
           Craft.Polymedia.openMuxUpload(assetIndex);
-        });
-      }
+        },
+      });
     },
 
     openSlideout: function (assetIndex) {
@@ -221,8 +255,9 @@
       this.assetIndex = settings.assetIndex || null;
       this.folderId = settings.folderId || null;
 
+      // Not “fitted”: empty/loading states need a stable wide shell (CSS min-width).
       var $container = $(
-        '<div class="modal fitted polymedia-mux-modal" role="dialog" aria-label="' +
+        '<div class="modal polymedia-mux-modal" role="dialog" aria-label="' +
           Craft.escapeHtml(Craft.t('polymedia', 'Browse Mux library')) +
           '"/>'
       );
@@ -253,12 +288,52 @@
       $container.append($header, this.$body, $footer);
 
       this.base($container, {
+        autoShow: false,
         hideOnShadeClick: true,
         shadeClass: 'modal-shade dark',
       });
 
+      // Garnish locks measured width/height as min-*; set desiredWidth so empty
+      // library states stay usable (CSS alone is overwritten on updateSizeAndPosition).
+      this.desiredWidth = Math.min(960, Math.max(560, Garnish.$win.width() - 48));
+      this.updateSizeAndPosition = function () {
+        Garnish.Modal.prototype.updateSizeAndPosition.call(this);
+        this._fitHeight();
+      };
+      this.show();
+
       this.addListener($footer.find('[data-action="close"]'), 'click', 'hide');
       this.loadPage(1);
+    },
+
+    /**
+     * Re-measure height to content after async updates (empty/error/grid load).
+     * Garnish otherwise keeps a stale min-height from the first layout pass.
+     */
+    _fitHeight: function () {
+      if (!this.$container || !this.$container.length) {
+        return;
+      }
+
+      var width = this.desiredWidth || Math.min(960, Math.max(560, Garnish.$win.width() - 48));
+      // Measure with height:auto so footer padding isn’t clipped by border-box.
+      this.$container.css({
+        width: width,
+        minWidth: width,
+        height: 'auto',
+        minHeight: 0,
+      });
+      var height = Math.min(
+        this.$container.outerHeight(),
+        Garnish.$win.height() - 2 * (this.settings.minGutter || 10)
+      );
+      height = Math.max(height, 200);
+      this.$container.css({
+        height: height,
+        minHeight: height,
+        left: Math.round((Garnish.$win.width() - width) / 2),
+        top: Math.round((Garnish.$win.height() - height) / 2),
+      });
     },
 
     loadPage: function (page) {
@@ -286,6 +361,7 @@
 
           if (!items.length) {
             self.$status.text(Craft.t('polymedia', 'No Mux assets found.'));
+            self.updateSizeAndPosition();
             return;
           }
 
@@ -294,6 +370,7 @@
           });
 
           self._renderPager(data.page || page, items.length);
+          self.updateSizeAndPosition();
         })
         .catch(function (error) {
           self.loading = false;
@@ -305,6 +382,7 @@
             Craft.t('polymedia', 'Could not load Mux library.');
           self.$status.text(message);
           Craft.cp.displayError(message);
+          self.updateSizeAndPosition();
         });
     },
 
@@ -477,6 +555,8 @@
     busy: false,
     $title: null,
     $file: null,
+    $chooseBtn: null,
+    $fileName: null,
     $progress: null,
     $progressBar: null,
     $status: null,
@@ -488,7 +568,7 @@
       this.folderId = settings.folderId || null;
 
       var $container = $(
-        '<div class="modal fitted polymedia-mux-upload-modal" role="dialog" aria-label="' +
+        '<div class="modal polymedia-mux-upload-modal" role="dialog" aria-label="' +
           Craft.escapeHtml(Craft.t('polymedia', 'Upload to Mux')) +
           '"/>'
       );
@@ -510,14 +590,29 @@
             '</div>'
         )
       );
+
+      // Craft CP pattern (AssetIndex / element select / user photo):
+      // hidden <input type="file"> + styled btn[data-icon=upload] that triggers it.
+      var chooseLabel = Craft.t('app', 'Upload a file');
+      var emptyFileLabel = Craft.t('polymedia', 'No file chosen');
       $body.append(
         $(
           '<div class="field">' +
-            '<div class="heading"><label for="polymedia-mux-file">' +
+            '<div class="heading"><label id="polymedia-mux-file-label">' +
             Craft.escapeHtml(Craft.t('polymedia', 'Video file')) +
             '</label></div>' +
-            '<div class="input"><input type="file" id="polymedia-mux-file" accept="video/*,.mp4,.mov,.m4v,.webm,.mkv"/></div>' +
-            '</div>'
+            '<div class="input">' +
+            '<div class="flex flex-nowrap polymedia-mux-file-picker">' +
+            '<input type="file" id="polymedia-mux-file" class="hidden" accept="video/*,.mp4,.mov,.m4v,.webm,.mkv" aria-labelledby="polymedia-mux-file-label"/>' +
+            '<button type="button" class="btn" data-icon="upload" data-action="choose-file" aria-controls="polymedia-mux-file">' +
+            Craft.escapeHtml(chooseLabel) +
+            '</button>' +
+            '<span class="polymedia-mux-filename light" data-empty="' +
+            Craft.escapeHtml(emptyFileLabel) +
+            '">' +
+            Craft.escapeHtml(emptyFileLabel) +
+            '</span>' +
+            '</div></div></div>'
         )
       );
       $body.append(
@@ -544,6 +639,8 @@
 
       this.$title = $body.find('#polymedia-mux-title');
       this.$file = $body.find('#polymedia-mux-file');
+      this.$chooseBtn = $body.find('[data-action="choose-file"]');
+      this.$fileName = $body.find('.polymedia-mux-filename');
 
       var $footer = $(
         '<div class="footer">' +
@@ -563,26 +660,77 @@
       $container.append($header, $body, $footer);
 
       this.base($container, {
+        autoShow: false,
         hideOnShadeClick: false,
         shadeClass: 'modal-shade dark',
       });
 
+      this.desiredWidth = Math.min(480, Math.max(360, Garnish.$win.width() - 48));
+      // Keep shell tight after every Garnish layout pass (fade-in / resize).
+      this.updateSizeAndPosition = function () {
+        Garnish.Modal.prototype.updateSizeAndPosition.call(this);
+        this._fitUploadShell();
+      };
+      this.show();
+
       this.addListener(this.$startBtn, 'click', 'startUpload');
       this.addListener(this.$cancelBtn, 'click', 'onCancel');
+      this.addListener(this.$chooseBtn, 'click', 'onChooseFile');
       this.addListener(this.$file, 'change', 'onFileChange');
+    },
+
+    _fitUploadShell: function () {
+      if (!this.$container || !this.$container.length) {
+        return;
+      }
+
+      var gutter = this.settings.minGutter || 10;
+      var maxH = Garnish.$win.height() - 2 * gutter;
+      var width = Math.min(480, Math.max(360, Garnish.$win.width() - 48));
+      this.desiredWidth = width;
+
+      // Keep height:auto (clear Garnish’s locked min-height) so progress/status
+      // rows can grow the shell without clipping. Re-center after measure.
+      this.$container.css({
+        width: width,
+        minWidth: width,
+        height: 'auto',
+        minHeight: 0,
+        maxHeight: maxH,
+      });
+      var height = Math.min(Math.max(this.$container.outerHeight(), 200), maxH);
+      this.$container.css({
+        left: Math.round((Garnish.$win.width() - width) / 2),
+        top: Math.round((Garnish.$win.height() - height) / 2),
+      });
+    },
+
+    onChooseFile: function () {
+      if (this.busy || this.$chooseBtn.hasClass('disabled')) {
+        return;
+      }
+
+      this.$file.trigger('click');
     },
 
     onFileChange: function () {
       var file = this.$file[0].files && this.$file[0].files[0];
+      var emptyLabel = this.$fileName.data('empty') || '';
 
       if (!file) {
+        this.$fileName.text(emptyLabel).addClass('light');
         return;
       }
+
+      this.$fileName.text(file.name).removeClass('light');
 
       if (!this.$title.val()) {
         var name = file.name.replace(/\.[^.]+$/, '');
         this.$title.val(name);
       }
+
+      // Content width may grow with a long filename.
+      this._fitUploadShell();
     },
 
     startUpload: function () {
@@ -606,9 +754,9 @@
 
       this.busy = true;
       this._setUiBusy(true);
-      this._setStatus(Craft.t('polymedia', 'Uploading…'));
       this.$progress.prop('hidden', false);
       this._setProgress(0);
+      this._setStatus(Craft.t('polymedia', 'Uploading…'));
 
       Craft.sendActionRequest('POST', 'polymedia/mux/create-upload', {
         data: {
@@ -793,6 +941,9 @@
         this._abortUpchunk();
         this._clearTimers();
         this.busy = false;
+        this._setUiBusy(false);
+        this._setStatus(Craft.t('polymedia', 'Upload cancelled.'));
+        Craft.cp.displayNotice(Craft.t('polymedia', 'Upload cancelled.'));
       }
 
       this.hide();
@@ -827,11 +978,15 @@
       this.$startBtn.prop('disabled', busy).toggleClass('loading', busy);
       this.$title.prop('disabled', busy);
       this.$file.prop('disabled', busy);
+      this.$chooseBtn
+        .prop('disabled', busy)
+        .toggleClass('disabled', busy);
       this.$cancelBtn.text(
         busy
           ? Craft.t('polymedia', 'Cancel')
           : Craft.t('polymedia', 'Close')
       );
+      this._fitUploadShell();
     },
 
     _setProgress: function (pct) {
@@ -842,6 +997,11 @@
 
     _setStatus: function (text) {
       this.$status.text(text || '');
+      // Status / progress visibility changes shell height — re-center after paint.
+      var self = this;
+      Garnish.requestAnimationFrame(function () {
+        self._fitUploadShell();
+      });
     },
   });
 

@@ -45,7 +45,7 @@ On non-public domains Craft allows unlicensed Pro for development (normal Craft 
 
 ## Adding Media
 
-Click **Add media URL**, paste any supported URL, and give it a title. The plugin auto-detects the provider type and creates a `.pmedia` manifest asset. The button is available in two places:
+Open the **Add media** menu and choose **From URL**, paste any supported URL, and give it a title. The plugin auto-detects the provider type and creates a `.pmedia` manifest asset. (With Pro + Mux credentials, the same menu also offers **Browse Mux library** and **Upload to Mux**.) The menu is available in two places:
 
 - **Assets index** — sits beside **Upload files**. The manifest lands in the volume/folder you're currently browsing, exactly like an uploaded file.
 - **Field selection modals** — when picking media for a Polymedia or Assets field. The manifest lands in the field's upload location.
@@ -54,13 +54,13 @@ No volume picker — the target follows your current location, falling back to t
 
 For providers that can't be auto-detected (Shaka, Video.js, PeerTube), use the "Force Type" dropdown.
 
-You can also set a poster image right on the **Add media URL** screen — image-only, with inline upload landing in the new item's folder. Posters and tracks can still be managed later on the asset edit screen.
+You can also set a poster image right on the **From URL** screen — image-only, with inline upload landing in the new item's folder. Posters and tracks can still be managed later on the asset edit screen.
 
 ### Mux library & upload (Pro)
 
 1. Install **Pro** and open **Settings → Plugins → Polymedia → Mux**.
 2. Enter a Mux API **Token ID** and **Token Secret** (env vars supported, e.g. `$MUX_TOKEN_ID`).
-3. On the Assets index (or field asset modal), use:
+3. On the Assets index (or field asset modal), open the **Add media** menu and use:
    - **Browse Mux library** — live list from your Mux account; import creates a `.pmedia` or reuses one matched by **playback ID**.
    - **Upload to Mux** — browser direct upload (UpChunk); when Mux has a playback ID, Craft creates/reuses the `.pmedia`.
 

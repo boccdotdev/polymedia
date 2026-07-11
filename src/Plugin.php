@@ -605,7 +605,7 @@ class Plugin extends BasePlugin
      * Reconciles orphaned `.pmedia` assets that have no `MediaItemRecord` row.
      *
      * Covers assets created by the asset indexer or manual file upload outside
-     * the plugin's "Add media URL" flow.
+     * the plugin's “Add media → From URL” flow.
      */
     private function _registerAssetReconciler(): void
     {
@@ -998,10 +998,15 @@ class Plugin extends BasePlugin
                 $view = Craft::$app->getView();
                 $view->registerAssetBundle(PolymediaAsset::class);
                 $view->registerTranslations('polymedia', [
+                    'Add media',
+                    'From URL',
+                    'Paste a YouTube, Vimeo, Mux, HLS, or other media URL',
+                    'Browse Mux library',
+                    'Import a video already in your Mux account',
+                    'Upload to Mux',
+                    'Upload a video file directly to Mux',
                     'Add media URL',
                     'Media item created.',
-                    'Browse Mux library',
-                    'Upload to Mux',
                     'Import',
                     'In Craft',
                     'Loading Mux library…',
@@ -1018,12 +1023,14 @@ class Plugin extends BasePlugin
                     'Errored',
                     'Title',
                     'Video file',
+                    'No file chosen',
                     'Start upload',
                     'Uploading…',
                     'Processing on Mux…',
                     'Creating media item…',
                     'Mux upload complete.',
                     'Upload failed.',
+                    'Upload cancelled.',
                     'Choose a video file.',
                     'Poster will be generated from the first frame when ready.',
                     'Cancel',

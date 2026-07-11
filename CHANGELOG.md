@@ -19,6 +19,8 @@
 - README: Lite/Pro editions, Mux credentials, browse/upload, poster priority, folder-image limits, public playback.
 
 ### Changed
+- CP: the separate **Add media URL**, **Browse Mux library**, and **Upload to Mux** buttons are now a single **Add media** disclosure menu (**From URL** / **Browse Mux library** / **Upload to Mux**) beside **Upload files**, on both the Assets index and field selection modals.
+- Mux upload modal: Craft-style file picker (hidden input + upload button + filename), a cancel notice, and an auto-sizing shell so progress/status rows never clip.
 - Mux thumbnail URLs use first frame (`?time=0`) instead of Mux’s mid-video default.
 - `autoFetchPoster` is implemented and re-enabled in settings (URL create path downloads a poster when none is supplied).
 - Mux library imports always attempt a first-frame poster when the item has no poster.

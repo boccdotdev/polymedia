@@ -17,7 +17,7 @@ use craft\web\assets\cp\CpAsset;
 /**
  * CP asset bundle for Polymedia.
  *
- * Bundles the JS and CSS needed for the "Add media URL" button
+ * Bundles the JS and CSS for the Assets “Add media” disclosure and Mux modals
  * and modal on the asset element index.
  *
  * @author boccdotdev

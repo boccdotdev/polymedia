@@ -44,7 +44,7 @@ class MediaItemsController extends Controller
     // =========================================================================
 
     /**
-     * Returns the "Add media URL" slideout screen.
+     * Returns the "From URL" / add-media slideout screen.
      *
      * @return Response
      *
@@ -64,7 +64,7 @@ class MediaItemsController extends Controller
         $folder = $this->_resolveFolder($folderId, $currentUser, $settings);
 
         return $this->asCpScreen()
-            ->title(Craft::t('polymedia', 'Add media URL'))
+            ->title(Craft::t('polymedia', 'From URL'))
             ->contentTemplate('polymedia/_cp/create-screen', [
                 'providerTypes' => $providerTypes,
                 'folderId' => $folder?->id ?? '',
