@@ -1,8 +1,8 @@
-#action-buttons .polymedia-add-btn + .btn,
-.toolbar .polymedia-add-btn {
-    margin-inline-start: 7px;
-}
-
+/* Match Craft #action-buttons / toolbar spacing (same as sibling .btn gaps). */
+#action-buttons .polymedia-add-btn,
+#action-buttons .polymedia-mux-browse-btn,
+#action-buttons .polymedia-mux-upload-btn,
+.toolbar .polymedia-add-btn,
 .toolbar .polymedia-mux-browse-btn,
 .toolbar .polymedia-mux-upload-btn {
     margin-inline-start: 7px;

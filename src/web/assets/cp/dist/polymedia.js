@@ -81,13 +81,14 @@
       if (assetIndex.settings && assetIndex.settings.context === 'index') {
         // Standalone Assets index: sit just before the "Upload files" button.
         // Craft re-creates that button on every source change, so (re)place
-        // ours relative to the current one each time to keep the order stable.
+        // ours relative to the current one each time to keep the order stable:
+        // [Add media URL] [Browse Mux] [Upload to Mux] [Upload files]
         var place = function () {
           var $upload = assetIndex.$uploadButton;
 
           if ($upload && $upload.length) {
             $upload.before($btn);
-          } else {
+          } else if (!$btn.parent().length) {
             assetIndex.addButton($btn);
           }
 
@@ -678,7 +679,9 @@
 
         attempts += 1;
 
-        Craft.sendActionRequest('GET', 'polymedia/mux/upload-status', {
+        // POST + body `data` (Craft/axios GET `data` is not sent as query params,
+        // so uploadId was missing and the endpoint returned 400 forever).
+        Craft.sendActionRequest('POST', 'polymedia/mux/upload-status', {
           data: { uploadId: self.uploadId },
         })
           .then(function (response) {
@@ -696,6 +699,16 @@
               return;
             }
 
+            // Still waiting for Mux asset/playback id
+            if (data.status) {
+              self._setStatus(
+                Craft.t('polymedia', 'Processing on Mux…') +
+                  ' (' +
+                  data.status +
+                  ')'
+              );
+            }
+
             if (attempts >= maxAttempts) {
               self._fail(Craft.t('polymedia', 'Upload failed.'));
               return;
@@ -704,13 +717,24 @@
             self.pollTimer = setTimeout(tick, 2000);
           })
           .catch(function (error) {
+            var status =
+              error && error.response && error.response.status
+                ? error.response.status
+                : 0;
+            var message =
+              (error &&
+                error.response &&
+                error.response.data &&
+                error.response.data.message) ||
+              Craft.t('polymedia', 'Upload failed.');
+
+            // Auth/validation errors will not recover — stop immediately.
+            if (status === 400 || status === 403 || status === 404) {
+              self._fail(message);
+              return;
+            }
+
             if (attempts >= maxAttempts) {
-              var message =
-                (error &&
-                  error.response &&
-                  error.response.data &&
-                  error.response.data.message) ||
-                Craft.t('polymedia', 'Upload failed.');
               self._fail(message);
               return;
             }

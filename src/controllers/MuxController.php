@@ -182,6 +182,8 @@ class MuxController extends Controller
     /**
      * Polls a Mux direct upload until an asset id (and preferably playback id) is available.
      *
+     * Accepts POST (preferred, body `uploadId`) or GET query `uploadId`.
+     *
      * @return Response
      *
      * @author boccdotdev
@@ -198,7 +200,12 @@ class MuxController extends Controller
             return $denied;
         }
 
-        $uploadId = trim((string)Craft::$app->getRequest()->getRequiredParam('uploadId'));
+        $request = Craft::$app->getRequest();
+        $uploadId = trim((string)(
+            $request->getBodyParam('uploadId')
+            ?? $request->getQueryParam('uploadId')
+            ?? ''
+        ));
 
         if ($uploadId === '') {
             return $this->asFailure(Craft::t('polymedia', 'Upload id is required.'));
