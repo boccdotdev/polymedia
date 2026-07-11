@@ -115,9 +115,39 @@ class RendererScriptsTest extends TestCase
         $this->assertDoesNotMatchRegularExpression('/<mux-video[^>]*\bsrc=/', $source);
     }
 
-    public function testNoControlsOnMediaController(): void
+    public function testPlayerOmitsNativeControls(): void
     {
         $source = file_get_contents(__DIR__ . '/../../src/services/Renderer.php');
-        $this->assertDoesNotMatchRegularExpression('/media-controller[^>]*controls/', $source);
+
+        // player() must pass false so native controls never land under media-controller
+        $this->assertMatchesRegularExpression(
+            '/\/\/ Native controls fight Media Chrome.*?_buildMediaAttrs\(\$manifest, \$settings, \$poster, \$elementTag, false\)/s',
+            $source,
+        );
+    }
+
+    public function testControlsOnlyEmittedWhenFlagTrue(): void
+    {
+        $source = file_get_contents(__DIR__ . '/../../src/services/Renderer.php');
+
+        // element() opts in; player() opts out
+        $this->assertStringContainsString('_buildMediaAttrs($manifest, $settings, $poster, $elementTag, true)', $source);
+        $this->assertStringContainsString('_buildMediaAttrs($manifest, $settings, $poster, $elementTag, false)', $source);
+        $this->assertStringContainsString('if ($emitControls && $settings->controls)', $source);
+        $this->assertStringContainsString("\$attrs['controls'] = true", $source);
+    }
+
+    public function testScriptsParsesEnvVars(): void
+    {
+        $source = file_get_contents(__DIR__ . '/../../src/services/Renderer.php');
+        $this->assertStringContainsString('App::parseEnv($settings->cdnHost)', $source);
+        $this->assertStringContainsString('App::parseEnv($settings->selfHostBaseUrl', $source);
+    }
+
+    public function testAudioPosterAltNotDoubleEncoded(): void
+    {
+        $source = file_get_contents(__DIR__ . '/../../src/services/Renderer.php');
+        $this->assertStringNotContainsString("'alt' => Html::encode(\$manifest['title']", $source);
+        $this->assertStringContainsString("'alt' => \$manifest['title'] ?? ''", $source);
     }
 }

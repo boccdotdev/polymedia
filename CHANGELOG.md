@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.2 - 2026-07-11
+
+### Fixed
+- Soft-deleting a polymedia asset no longer drops its `MediaItemRecord` or related poster/track attachments. Restore from trash keeps metadata intact; cleanup still runs on hard delete (including the dedicated item folder).
+- `craft.polymedia.element()` now emits the native `controls` attribute when enabled (default). `player()` still omits it so Media Chrome controls are not doubled.
+- CDN host and self-host base URL settings with env vars (`$VAR` / aliases) are resolved via `App::parseEnv()` in `scripts()`.
+- VTT validation (`validateVttOnUpload`) runs when attaching tracks from the asset editor; invalid files are skipped.
+- Double-encoded `alt` on audio cover `<img>` posters.
+- CP JS strings (`Add media URL`, `Media item created.`) are registered for translation.
+
+### Changed
+- Settings UI no longer shows unimplemented options: Attachments Volume, Auto-Fetch Poster, Require Captions for Video, Caption Language from Site, Restrict Asset Kinds. Model properties remain for project config BC (removal planned for 2.0).
+- README clarifies that `controls` applies to `element()` / `getElement()`, not `player()`.
+
 ## 1.2.1 - 2026-05-29
 
 ### Fixed

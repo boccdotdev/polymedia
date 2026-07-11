@@ -34,6 +34,7 @@ class Settings extends Model
     /**
      * @var ?string UID of the volume for inline-uploaded posters, captions, and transcripts.
      * Falls back to `$defaultVolumeUid` when null.
+     * @deprecated 1.2.2 Unused; kept for project config BC. Removal planned for 2.0.
      */
     public ?string $attachmentsVolumeUid = null;
 
@@ -49,16 +50,19 @@ class Settings extends Model
 
     /**
      * @var bool Whether native Assets fields can be configured to only allow polymedia kinds.
+     * @deprecated 1.2.2 Unused; kept for project config BC. Removal planned for 2.0.
      */
     public bool $restrictAssetKinds = false;
 
     /**
      * @var bool Whether to show a CP warning when saving a video-type item with no captions.
+     * @deprecated 1.2.2 Unused; kept for project config BC. Removal planned for 2.0.
      */
     public bool $requireCaptionsForVideo = false;
 
     /**
      * @var bool Auto-set the caption row's siteId to match the current CP site when uploading.
+     * @deprecated 1.2.2 Unused; kept for project config BC. Removal planned for 2.0.
      */
     public bool $defaultCaptionLanguageFromSite = true;
 
@@ -69,6 +73,7 @@ class Settings extends Model
 
     /**
      * @var bool Download derived thumbnail as poster on asset creation.
+     * @deprecated 1.2.2 Unused until implemented (planned with Mux Pro / 2.0); kept for project config BC.
      */
     public bool $autoFetchPoster = true;
 

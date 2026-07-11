@@ -96,11 +96,15 @@ Renders a full `<media-controller>` player:
 {{ craft.polymedia.player(media) }}
 ```
 
-Options: `autoplay`, `loop`, `muted`, `controls`, `playsinline`, `preload`, `crossorigin`, `poster`, `class`, `id`, `attrs`, `children`, `tracks`.
+Options: `autoplay`, `loop`, `muted`, `playsinline`, `preload`, `crossorigin`, `poster`, `class`, `id`, `attrs`, `children`, `tracks`.
+
+> **Note:** `controls` is intentionally **not** applied inside `player()`. Media Chrome supplies the control UI; native controls would conflict with `<media-controller>`.
 
 ### `craft.polymedia.element(asset, options)`
 
-Renders just the media element (no controller wrapper).
+Renders just the media element (no controller wrapper). Use this when you want a bare provider element without Media Chrome.
+
+Options: `autoplay`, `loop`, `muted`, **`controls`**, `playsinline`, `preload`, `crossorigin`, `poster`. Defaults include `controls: true` so bare `<video>`/`<audio>` elements are usable without a custom control bar.
 
 ### `craft.polymedia.data(asset)`
 

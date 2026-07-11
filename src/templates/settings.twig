@@ -15,16 +15,7 @@
     disabled: not allowAdminChanges,
 }) }}
 
-{{ forms.selectField({
-    label: 'Attachments Volume'|t('polymedia'),
-    instructions: 'Where inline-uploaded posters, captions, and transcripts are saved. Falls back to the default volume if not set.'|t('polymedia'),
-    id: 'attachmentsVolumeUid',
-    name: 'attachmentsVolumeUid',
-    value: settings.attachmentsVolumeUid,
-    options: volumeOptions,
-    errors: settings.getErrors('attachmentsVolumeUid'),
-    disabled: not allowAdminChanges,
-}) }}
+{# attachmentsVolumeUid: dead setting — property kept for project config BC; UI removed in 1.2.2 #}
 
 <hr>
 
@@ -109,15 +100,6 @@
 <h2>{{ 'Behaviour'|t('polymedia') }}</h2>
 
 {{ forms.lightswitchField({
-    label: 'Auto-Fetch Poster'|t('polymedia'),
-    instructions: 'Automatically download derived poster thumbnails when creating media items (YouTube, Vimeo, Mux, Cloudflare, Wistia).'|t('polymedia'),
-    id: 'autoFetchPoster',
-    name: 'autoFetchPoster',
-    on: settings.autoFetchPoster,
-    disabled: not allowAdminChanges,
-}) }}
-
-{{ forms.lightswitchField({
     label: 'Validate VTT on Upload'|t('polymedia'),
     instructions: 'Check for a valid `WEBVTT` header when attaching caption files.'|t('polymedia'),
     id: 'validateVttOnUpload',
@@ -126,32 +108,8 @@
     disabled: not allowAdminChanges,
 }) }}
 
-{{ forms.lightswitchField({
-    label: 'Require Captions for Video'|t('polymedia'),
-    instructions: 'Show a warning (not an error) when saving a video-type item with no captions attached.'|t('polymedia'),
-    id: 'requireCaptionsForVideo',
-    name: 'requireCaptionsForVideo',
-    on: settings.requireCaptionsForVideo,
-    disabled: not allowAdminChanges,
-}) }}
-
-{{ forms.lightswitchField({
-    label: 'Caption Language from Site'|t('polymedia'),
-    instructions: "Auto-set the caption row's site to match the current CP site when uploading."|t('polymedia'),
-    id: 'defaultCaptionLanguageFromSite',
-    name: 'defaultCaptionLanguageFromSite',
-    on: settings.defaultCaptionLanguageFromSite,
-    disabled: not allowAdminChanges,
-}) }}
-
-{{ forms.lightswitchField({
-    label: 'Restrict Asset Kinds'|t('polymedia'),
-    instructions: 'Allow native Assets fields to be restricted to polymedia kinds only.'|t('polymedia'),
-    id: 'restrictAssetKinds',
-    name: 'restrictAssetKinds',
-    on: settings.restrictAssetKinds,
-    disabled: not allowAdminChanges,
-}) }}
+{# Dead settings (kept on Settings model for project config BC; UI removed 1.2.2):
+   autoFetchPoster, requireCaptionsForVideo, defaultCaptionLanguageFromSite, restrictAssetKinds #}
 
 <hr>
 

@@ -321,11 +321,14 @@ class Plugin extends BasePlugin
                     return;
                 }
 
-                $this->getMediaItems()->deleteByAssetId($asset->id);
-
-                if ($asset->hardDelete) {
-                    $this->_deleteItemFolderIfDedicated($asset);
+                // Soft delete leaves MediaItemRecord + related assets intact so
+                // restore from trash keeps poster/tracks. Hard delete cleans up.
+                if (!$asset->hardDelete) {
+                    return;
                 }
+
+                $this->getMediaItems()->deleteByAssetId($asset->id);
+                $this->_deleteItemFolderIfDedicated($asset);
             },
         );
     }
@@ -768,6 +771,10 @@ class Plugin extends BasePlugin
                 continue;
             }
 
+            if (!$relatedAssets->validateVtt($asset)) {
+                continue;
+            }
+
             $relatedAssets->attach(
                 itemId: $record->id,
                 assetId: $assetId,
@@ -1116,7 +1123,12 @@ class Plugin extends BasePlugin
             View::class,
             View::EVENT_BEFORE_RENDER_TEMPLATE,
             function() {
-                Craft::$app->getView()->registerAssetBundle(PolymediaAsset::class);
+                $view = Craft::$app->getView();
+                $view->registerAssetBundle(PolymediaAsset::class);
+                $view->registerTranslations('polymedia', [
+                    'Add media URL',
+                    'Media item created.',
+                ]);
             },
         );
     }

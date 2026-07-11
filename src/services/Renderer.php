@@ -15,6 +15,7 @@ use boccdotdev\polymedia\models\PlayerSettings;
 use boccdotdev\polymedia\Plugin;
 use Craft;
 use craft\elements\Asset;
+use craft\helpers\App;
 use craft\helpers\Html;
 use craft\helpers\Json;
 use Twig\Markup;
@@ -105,7 +106,8 @@ class Renderer extends Component
             $controllerAttrs[$k] = $v;
         }
 
-        $mediaAttrs = $this->_buildMediaAttrs($manifest, $settings, $poster, $elementTag);
+        // Native controls fight Media Chrome's controller UI — omit on player().
+        $mediaAttrs = $this->_buildMediaAttrs($manifest, $settings, $poster, $elementTag, false);
         $trackHtml = $this->_buildTracksHtml($asset, $options);
 
         $mediaHtml = Html::beginTag($elementTag, $mediaAttrs)
@@ -116,7 +118,7 @@ class Renderer extends Component
             $mediaHtml .= Html::tag('img', '', [
                 'slot' => 'poster',
                 'src' => $poster,
-                'alt' => Html::encode($manifest['title'] ?? ''),
+                'alt' => $manifest['title'] ?? '',
                 'class' => 'polymedia-cover',
             ]);
         }
@@ -162,7 +164,8 @@ class Renderer extends Component
         $settings = $this->_mergeOptions($defaults, $options);
         $poster = $this->_resolvePoster($asset, $manifest, $options);
 
-        $mediaAttrs = $this->_buildMediaAttrs($manifest, $settings, $poster, $elementTag);
+        // element() has no media-controller; emit native controls when requested.
+        $mediaAttrs = $this->_buildMediaAttrs($manifest, $settings, $poster, $elementTag, true);
         unset($mediaAttrs['slot']);
 
         $html = Html::beginTag($elementTag, $mediaAttrs) . Html::endTag($elementTag);
@@ -230,7 +233,7 @@ class Renderer extends Component
         $tags = [];
 
         if ($mode === 'cdn') {
-            $cdnHost = $settings->cdnHost;
+            $cdnHost = App::parseEnv($settings->cdnHost) ?: $settings->cdnHost;
             $tags[] = Html::tag('script', '', [
                 'type' => 'module',
                 'src' => "https://{$cdnHost}/npm/media-chrome@{$version}/+esm",
@@ -247,7 +250,8 @@ class Renderer extends Component
                 }
             }
         } elseif ($mode === 'self-host') {
-            $base = rtrim($settings->selfHostBaseUrl ?? '', '/');
+            $selfHostBase = App::parseEnv($settings->selfHostBaseUrl ?? '') ?: ($settings->selfHostBaseUrl ?? '');
+            $base = rtrim((string)$selfHostBase, '/');
             $tags[] = Html::tag('script', '', [
                 'type' => 'module',
                 'src' => "{$base}/media-chrome.min.js",
@@ -420,6 +424,9 @@ class Renderer extends Component
      * @param PlayerSettings $settings the resolved settings
      * @param ?string $poster the resolved poster URL
      * @param string $elementTag the element tag name
+     * @param bool $emitControls whether to emit the native `controls` attribute
+     *        (true for bare `element()`; false inside `player()` where Media
+     *        Chrome supplies the control UI)
      * @return array
      */
     private function _buildMediaAttrs(
@@ -427,6 +434,7 @@ class Renderer extends Component
         PlayerSettings $settings,
         ?string $poster,
         string $elementTag,
+        bool $emitControls = false,
     ): array {
         $type = $manifest['type'] ?? '';
         $attrs = ['slot' => 'media'];
@@ -451,6 +459,10 @@ class Renderer extends Component
 
         if ($settings->muted) {
             $attrs['muted'] = true;
+        }
+
+        if ($emitControls && $settings->controls) {
+            $attrs['controls'] = true;
         }
 
         if ($settings->playsinline) {
