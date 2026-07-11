@@ -14,6 +14,9 @@
 - CP config flag `Craft.Polymedia.muxEnabled` (Pro + credentials).
 - **Upload to Mux** CP modal: direct upload via UpChunk, progress bar, poll until playback ID, create/reuse `.pmedia`, first-frame poster job.
 - Vendored `@mux/upchunk` in the CP asset bundle.
+- Optional **delete Mux asset on Craft hard-delete** (default off); soft-delete never calls Mux.
+- Light **Mux status badge** + asset id on the asset editor for imported/uploaded items.
+- README: Lite/Pro editions, Mux credentials, browse/upload, poster priority, folder-image limits, public playback.
 
 ### Changed
 - Mux thumbnail URLs use first frame (`?time=0`) instead of Mux’s mid-video default.

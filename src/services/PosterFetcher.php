@@ -52,6 +52,23 @@ class PosterFetcher extends Component
     // =========================================================================
 
     /**
+     * Whether auto-fetch should leave an existing poster alone.
+     *
+     * User-uploaded / already-attached posters win unless `$force` is true.
+     *
+     * @param ?Asset $existingPoster related poster asset, if any
+     * @param bool $force re-download even when a poster already exists
+     * @return bool
+     *
+     * @author boccdotdev
+     * @since 2.0.0
+     */
+    public function shouldSkipAutoFetch(?Asset $existingPoster, bool $force = false): bool
+    {
+        return $existingPoster !== null && !$force;
+    }
+
+    /**
      * Returns the existing poster if present, otherwise downloads `$remoteUrl`
      * (or a derived URL) into the item folder and attaches it.
      *
@@ -71,7 +88,7 @@ class PosterFetcher extends Component
         $related = Plugin::getInstance()->getRelatedAssets();
         $existing = $related->getPoster((int)$record->id);
 
-        if ($existing && !$force) {
+        if ($this->shouldSkipAutoFetch($existing, $force)) {
             return $existing;
         }
 

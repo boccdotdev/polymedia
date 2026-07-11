@@ -30,6 +30,19 @@ Field settings:
 
 > **Note:** The native Assets field still works with `.pmedia` files for headless or advanced use cases, but loses provider filtering.
 
+## Editions (Lite / Pro)
+
+Polymedia ships with two Craft Plugin Store editions:
+
+| Edition | Includes |
+|---------|----------|
+| **Lite** (free) | URL media for all providers (including **paste** a Mux stream URL), field, player, posters, tracks |
+| **Pro** | Everything in Lite **+** Mux Token settings, **Browse Mux library**, **Upload to Mux** (direct upload) |
+
+Paste-a-Mux-URL playback never requires Pro. Library browse and direct upload do.
+
+On non-public domains Craft allows unlicensed Pro for development (normal Craft trial rules).
+
 ## Adding Media
 
 Click **Add media URL**, paste any supported URL, and give it a title. The plugin auto-detects the provider type and creates a `.pmedia` manifest asset. The button is available in two places:
@@ -42,6 +55,20 @@ No volume picker — the target follows your current location, falling back to t
 For providers that can't be auto-detected (Shaka, Video.js, PeerTube), use the "Force Type" dropdown.
 
 You can also set a poster image right on the **Add media URL** screen — image-only, with inline upload landing in the new item's folder. Posters and tracks can still be managed later on the asset edit screen.
+
+### Mux library & upload (Pro)
+
+1. Install **Pro** and open **Settings → Plugins → Polymedia → Mux**.
+2. Enter a Mux API **Token ID** and **Token Secret** (env vars supported, e.g. `$MUX_TOKEN_ID`).
+3. On the Assets index (or field asset modal), use:
+   - **Browse Mux library** — live list from your Mux account; import creates a `.pmedia` or reuses one matched by **playback ID**.
+   - **Upload to Mux** — browser direct upload (UpChunk); when Mux has a playback ID, Craft creates/reuses the `.pmedia`.
+
+**Playback policy:** v1 imports **public** playback only. Signed-only assets are flagged in the browse UI and cannot be imported yet.
+
+**Mux service fees** are separate from the Polymedia Pro license.
+
+Optional setting **Delete Mux asset when Craft asset is deleted** (default **off**): when enabled, **hard-deleting** a Mux `.pmedia` also deletes the video in Mux. Soft-delete / trash never calls Mux.
 
 ### Per-item folders
 
@@ -258,12 +285,28 @@ Use the `children` option to add Media Chrome control elements:
 
 ## Posters and Cover Artwork
 
+### Front-end player
+
 Poster resolution order (highest priority first):
 1. Explicit `poster` option in Twig (`false` suppresses entirely)
 2. Item-level poster (attached via asset edit screen)
 3. Derived thumbnail from manifest (auto-generated for YouTube, Vimeo, Mux, Cloudflare, Wistia)
 
 For audio types, the poster is emitted as `<img slot="poster" class="polymedia-cover">` inside `<media-controller audio>` — available to themes that render a "now playing" cover.
+
+### Auto-fetch & create-time priority
+
+When creating media **without** a user-selected poster:
+
+1. **User poster** (create screen or asset editor) always wins — never overwritten by auto-fetch.
+2. Else if **Auto-Fetch Poster** is on (URL create), or always for **Mux library/upload** imports: download a still into the item’s dedicated folder and attach it as the poster.
+3. **Mux** uses the Image API first frame: `https://image.mux.com/{playbackId}/thumbnail.jpg?time=0` (Mux’s default without `time` is mid-video).
+4. If the Mux image is not ready yet, a queue job retries with backoff.
+5. Last resort: remote thumbnail URL only in manifest metadata (CP may show it until a local poster exists).
+
+CP asset index / picker thumbs for `.pmedia` files use the related poster when present, else the remote thumbnail URL.
+
+**Folder covers:** Craft has no first-class folder-cover API. Posters are co-located in each item’s dedicated folder so folder contents show the image; the parent index still uses Craft’s folder icon for the folder row itself.
 
 ## Accessibility
 

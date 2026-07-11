@@ -12,6 +12,7 @@
 namespace boccdotdev\polymedia\services;
 
 use boccdotdev\polymedia\records\MediaItemRecord;
+use craft\helpers\Json;
 use yii\base\Component;
 
 /**
@@ -230,5 +231,47 @@ class MediaItems extends Component
         }
 
         return $map;
+    }
+
+    /**
+     * Decodes a media item’s JSON `metadata` column to an array.
+     *
+     * @param MediaItemRecord $record
+     * @return array<string, mixed>
+     *
+     * @author boccdotdev
+     * @since 2.0.0
+     */
+    public function getMetadata(MediaItemRecord $record): array
+    {
+        return self::decodeMetadataJson($record->metadata);
+    }
+
+    /**
+     * Decodes a raw metadata JSON string (or empty/null) to an array.
+     *
+     * @param mixed $raw value from the `metadata` column
+     * @return array<string, mixed>
+     *
+     * @author boccdotdev
+     * @since 2.0.0
+     */
+    public static function decodeMetadataJson(mixed $raw): array
+    {
+        if ($raw === null || $raw === '') {
+            return [];
+        }
+
+        if (is_array($raw)) {
+            return $raw;
+        }
+
+        if (!is_string($raw)) {
+            return [];
+        }
+
+        $decoded = Json::decodeIfJson($raw);
+
+        return is_array($decoded) ? $decoded : [];
     }
 }

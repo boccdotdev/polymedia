@@ -406,6 +406,10 @@ class Plugin extends BasePlugin
 
     /**
      * Cleans up media item records when assets are deleted.
+     *
+     * Soft delete leaves records intact for trash restore. Hard delete removes
+     * the item record and dedicated folder, and optionally deletes the remote
+     * Mux asset when {@see Settings::$deleteMuxAssetOnDelete} is enabled.
      */
     private function _registerAssetDeleteHandler(): void
     {
@@ -426,10 +430,62 @@ class Plugin extends BasePlugin
                     return;
                 }
 
-                $this->getMediaItems()->deleteByAssetId($asset->id);
+                $record = $this->getMediaItems()->getByAssetId((int)$asset->id);
+                $this->_maybeDeleteMuxAsset($record);
+                $this->getMediaItems()->deleteByAssetId((int)$asset->id);
                 $this->_deleteItemFolderIfDedicated($asset);
             },
         );
+    }
+
+    /**
+     * Deletes the remote Mux asset when the setting is on and metadata has an id.
+     *
+     * Failures are logged and do not block local Craft cleanup.
+     *
+     * @param ?MediaItemRecord $record
+     */
+    private function _maybeDeleteMuxAsset(?MediaItemRecord $record): void
+    {
+        if (!$record || $record->type !== 'mux') {
+            return;
+        }
+
+        $settings = $this->getSettings();
+
+        if (!$settings->deleteMuxAssetOnDelete) {
+            return;
+        }
+
+        // Feature is Pro-only; skip silently on Lite even if metadata exists.
+        if (!$this->getIsPro() || !$this->getMux()->isConfigured()) {
+            return;
+        }
+
+        $metadata = $this->getMediaItems()->getMetadata($record);
+        $muxAssetId = isset($metadata['muxAssetId']) ? (string)$metadata['muxAssetId'] : '';
+
+        if ($muxAssetId === '') {
+            Craft::warning(
+                "Polymedia: deleteMuxAssetOnDelete is on but asset #{$record->assetId} has no muxAssetId in metadata.",
+                __METHOD__,
+            );
+
+            return;
+        }
+
+        try {
+            $this->getMux()->deleteAsset($muxAssetId);
+            Craft::info(
+                "Polymedia: deleted Mux asset {$muxAssetId} after hard-delete of Craft asset #{$record->assetId}.",
+                __METHOD__,
+            );
+        } catch (\Throwable $e) {
+            Craft::error(
+                "Polymedia: failed to delete Mux asset {$muxAssetId}: {$e->getMessage()}",
+                __METHOD__,
+            );
+        }
     }
 
     /**

@@ -43,4 +43,14 @@ class PosterFetcherTest extends TestCase
         $this->assertSame(60, $this->_fetcher->backoffSeconds(2));
         $this->assertSame(600, $this->_fetcher->backoffSeconds(10));
     }
+
+    public function testShouldSkipAutoFetchWhenPosterExists(): void
+    {
+        // Asset is final; use a simple mock without Craft bootstrap.
+        $poster = $this->createMock(\craft\elements\Asset::class);
+
+        $this->assertTrue($this->_fetcher->shouldSkipAutoFetch($poster, false));
+        $this->assertFalse($this->_fetcher->shouldSkipAutoFetch($poster, true));
+        $this->assertFalse($this->_fetcher->shouldSkipAutoFetch(null, false));
+    }
 }
