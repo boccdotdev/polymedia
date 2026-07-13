@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.1.0 - 2026-07-13
+
+### Added
+- **GraphQL support.** Assets expose a `polymedia` field on the Asset GraphQL interface (`null` for non-`.pmedia` assets) with `type`, `providerId`, `element`, `url`, `title`, `duration`, `width`, `height`, `poster`, `tracks(role, siteId)`, `transcriptUrl`, and `metadata`.
+- **“View polymedia data” schema component** gates the field per schema (off by default, including the public schema).
+- `MediaItems::getByAssetIds()` and `RelatedAssets::getForItemIds()` batch lookups; GraphQL resolution costs a fixed number of queries regardless of item count.
+
+### Notes
+- The `polymedia` handle is now reserved on asset field layouts (a custom field with that handle would collide with the GraphQL interface field).
+- GraphQL itself requires Craft Pro (a Craft constraint, not a plugin one).
+
 ## 2.0.0 - 2026-07-11
 
 ### Added

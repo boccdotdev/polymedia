@@ -46,4 +46,12 @@ class MediaItemsLookupTest extends TestCase
         $this->assertNull($service->getById(0));
         $this->assertNull($service->getById(-1));
     }
+
+    public function testGetByAssetIdsReturnsEmptyForEmptyInput(): void
+    {
+        $service = new MediaItems();
+
+        $this->assertSame([], $service->getByAssetIds([]));
+        $this->assertSame([], $service->getByAssetIds([0, -1]));
+    }
 }
