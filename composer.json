@@ -48,7 +48,8 @@
         "developer": "boccdotdev",
         "developerUrl": "https://bocc.dev",
         "documentationUrl": "https://github.com/boccdotdev/polymedia",
-        "class": "boccdotdev\\polymedia\\Plugin"
+        "class": "boccdotdev\\polymedia\\Plugin",
+        "craftcms-claude-skills": "1.6.0"
     },
     "autoload-dev": {
         "psr-4": {
