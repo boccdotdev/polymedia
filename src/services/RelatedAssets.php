@@ -64,6 +64,41 @@ class RelatedAssets extends Component
     }
 
     /**
+     * Returns related asset records for a batch of media item IDs, keyed by item ID.
+     *
+     * @param int[] $itemIds the media item record IDs
+     * @return array<int, RelatedAssetRecord[]> keyed by item ID, ordered by sortOrder
+     *
+     * @author boccdotdev
+     * @since 2.1.0
+     */
+    public function getForItemIds(array $itemIds): array
+    {
+        $itemIds = array_values(array_unique(array_filter(
+            array_map('intval', $itemIds),
+            static fn(int $id) => $id > 0,
+        )));
+
+        if ($itemIds === []) {
+            return [];
+        }
+
+        /** @var RelatedAssetRecord[] $records */
+        $records = RelatedAssetRecord::find()
+            ->where(['itemId' => $itemIds])
+            ->orderBy(['sortOrder' => SORT_ASC, 'id' => SORT_ASC])
+            ->all();
+
+        $map = [];
+
+        foreach ($records as $record) {
+            $map[(int)$record->itemId][] = $record;
+        }
+
+        return $map;
+    }
+
+    /**
      * Returns the poster related asset for a media item.
      *
      * @param int $itemId the media item record ID

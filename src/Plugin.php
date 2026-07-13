@@ -14,6 +14,11 @@ namespace boccdotdev\polymedia;
 use boccdotdev\polymedia\behaviors\PolymediaAssetBehavior;
 use boccdotdev\polymedia\behaviors\PolymediaAssetFieldBehavior;
 use boccdotdev\polymedia\fields\PolymediaField;
+use boccdotdev\polymedia\gql\loaders\MediaItemLoader;
+use boccdotdev\polymedia\gql\loaders\RelatedAssetLoader;
+use boccdotdev\polymedia\gql\PolymediaGqlHelper;
+use boccdotdev\polymedia\gql\resolvers\PolymediaResolver;
+use boccdotdev\polymedia\gql\types\PolymediaDataType;
 use boccdotdev\polymedia\models\DetectionResult;
 use boccdotdev\polymedia\models\PlayerSettings;
 use boccdotdev\polymedia\models\Settings;
@@ -41,21 +46,26 @@ use craft\events\DefineAssetThumbUrlEvent;
 use craft\events\DefineAttributeHtmlEvent;
 use craft\events\DefineBehaviorsEvent;
 use craft\events\DefineElementEditorHtmlEvent;
+use craft\events\DefineGqlTypeFieldsEvent;
 use craft\events\FieldEvent;
 use craft\events\ModelEvent;
 use craft\events\RegisterAssetFileKindsEvent;
 use craft\events\RegisterComponentTypesEvent;
 use craft\events\RegisterElementSortOptionsEvent;
 use craft\events\RegisterElementTableAttributesEvent;
+use craft\events\RegisterGqlSchemaComponentsEvent;
 use craft\events\TemplateEvent;
 use craft\fields\Assets as AssetsField;
+use craft\gql\TypeManager;
 use craft\helpers\Assets;
 use craft\helpers\Cp;
+use craft\helpers\Gql as GqlHelper;
 use craft\helpers\Html;
 use craft\helpers\Json;
 use craft\models\VolumeFolder;
 use craft\services\Assets as AssetsService;
 use craft\services\Fields;
+use craft\services\Gql as GqlService;
 use craft\web\twig\variables\CraftVariable;
 use craft\web\View;
 use yii\base\Event;
@@ -167,6 +177,7 @@ class Plugin extends BasePlugin
         $this->_registerAssetFieldValidation();
         $this->_registerTwigVariable();
         $this->_registerCpAssets();
+        $this->_registerGql();
     }
 
     /**
@@ -1042,6 +1053,54 @@ class Plugin extends BasePlugin
                     ]) . ';',
                     View::POS_HEAD,
                 );
+            },
+        );
+    }
+
+    /**
+     * Registers GraphQL support: the `polymedia` field on the Asset interface,
+     * the schema component that gates it, and per-query loader resets.
+     *
+     * The field only lands on schemas where the “View polymedia data” component
+     * is enabled; everywhere else (including the public schema) it is absent
+     * from the schema entirely.
+     */
+    private function _registerGql(): void
+    {
+        Event::on(
+            TypeManager::class,
+            TypeManager::EVENT_DEFINE_GQL_TYPE_FIELDS,
+            function(DefineGqlTypeFieldsEvent $event) {
+                if ($event->typeName !== 'AssetInterface' || !PolymediaGqlHelper::canQueryPolymedia()) {
+                    return;
+                }
+
+                $event->fields['polymedia'] = [
+                    'name' => 'polymedia',
+                    'type' => PolymediaDataType::getType(),
+                    'description' => 'Polymedia data for `.pmedia` media assets, or `null` for other assets.',
+                    'complexity' => GqlHelper::eagerLoadComplexity(),
+                    'resolve' => PolymediaResolver::class . '::resolve',
+                ];
+            },
+        );
+
+        Event::on(
+            GqlService::class,
+            GqlService::EVENT_REGISTER_GQL_SCHEMA_COMPONENTS,
+            function(RegisterGqlSchemaComponentsEvent $event) {
+                $event->queries['Polymedia'] = [
+                    'polymedia.data:read' => ['label' => Craft::t('polymedia', 'View polymedia data')],
+                ];
+            },
+        );
+
+        Event::on(
+            GqlService::class,
+            GqlService::EVENT_BEFORE_EXECUTE_GQL_QUERY,
+            function() {
+                MediaItemLoader::reset();
+                RelatedAssetLoader::reset();
             },
         );
     }

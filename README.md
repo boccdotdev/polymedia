@@ -369,11 +369,46 @@ If you intentionally enforce a strict global policy, scope the relaxation to pag
 
 ## GraphQL
 
-GraphQL support is planned for v2. Currently Twig-only.
+Assets expose a `polymedia` field on the GraphQL Asset interface — `null` for anything that isn't a `.pmedia` asset. It works through any query that returns assets (asset fields on entries, the root `assets` query), so headless front ends need no special queries:
+
+```graphql
+{
+  assets(kind: "polymedia") {
+    title
+    polymedia {
+      type          # mux | youtube | vimeo | hls | …
+      providerId    # Mux playback ID, YouTube video ID, …
+      element       # mux-video, youtube-video, video, …
+      url
+      title
+      duration      # seconds, if known
+      width
+      height
+      poster        # attached poster asset URL, falling back to the remote thumbnail
+      tracks(role: ["captions", "subtitles"], siteId: 1) {
+        kind        # captions | subtitles | descriptions
+        url
+        srclang
+        label
+        isDefault
+        siteId
+      }
+      transcriptUrl
+      metadata      # raw metadata as a JSON-encoded string
+    }
+  }
+}
+```
+
+- **Enable per schema.** The field is gated behind a **Polymedia → View polymedia data** schema component (GraphQL → Schemas in the control panel). It is off by default everywhere, including the public schema — the field doesn't exist in a schema until you enable it.
+- `tracks` accepts optional `role` (defaults to all three kinds) and `siteId` (defaults to the site the asset was queried in) arguments.
+- Resolution is batched: any number of media items in a query costs a fixed number of database queries, and the `.pmedia` manifest file is never read.
+- GraphQL itself requires Craft Pro (a Craft constraint, not a plugin one).
+- The `polymedia` handle is reserved on asset field layouts — a custom field with that handle on a volume's layout would collide with the interface field.
 
 ## Roadmap
 
-- [ ] GraphQL types and queries
+- [x] GraphQL types and queries
 - [ ] Client-side metadata writeback (`loadedmetadata` → duration/dimensions)
 - [ ] Live streaming UI hints
 - [ ] Console command for self-host script bundling

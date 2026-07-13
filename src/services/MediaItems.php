@@ -58,6 +58,65 @@ class MediaItems extends Component
     }
 
     /**
+     * Returns media item records for a batch of asset IDs, keyed by asset ID.
+     *
+     * Primes the per-request cache, including negative entries for asset IDs
+     * with no record, so follow-up {@see getByAssetId()} calls skip the query.
+     *
+     * @param int[] $assetIds the asset IDs to look up
+     * @return array<int, MediaItemRecord> keyed by asset ID; misses are omitted
+     *
+     * @author boccdotdev
+     * @since 2.1.0
+     */
+    public function getByAssetIds(array $assetIds): array
+    {
+        $assetIds = array_values(array_unique(array_filter(
+            array_map('intval', $assetIds),
+            static fn(int $id) => $id > 0,
+        )));
+
+        if ($assetIds === []) {
+            return [];
+        }
+
+        $map = [];
+        $missing = [];
+
+        foreach ($assetIds as $assetId) {
+            if (!array_key_exists($assetId, $this->_byAssetId)) {
+                $missing[] = $assetId;
+                continue;
+            }
+
+            if ($this->_byAssetId[$assetId] !== null) {
+                $map[$assetId] = $this->_byAssetId[$assetId];
+            }
+        }
+
+        if ($missing === []) {
+            return $map;
+        }
+
+        /** @var MediaItemRecord[] $records */
+        $records = MediaItemRecord::find()
+            ->where(['assetId' => $missing])
+            ->all();
+
+        foreach ($missing as $assetId) {
+            $this->_byAssetId[$assetId] = null;
+        }
+
+        foreach ($records as $record) {
+            $assetId = (int)$record->assetId;
+            $this->_byAssetId[$assetId] = $record;
+            $map[$assetId] = $record;
+        }
+
+        return $map;
+    }
+
+    /**
      * Returns the media item record by primary key.
      *
      * @param int $id the media item record ID
