@@ -316,6 +316,9 @@
       }
 
       var width = this.desiredWidth || Math.min(960, Math.max(560, Garnish.$win.width() - 48));
+      // Release the body’s previously-fitted height so the shell measures to its
+      // natural content height (a leftover value would skew the measurement).
+      this.$body.css({ height: '', overflowY: '' });
       // Measure with height:auto so footer padding isn’t clipped by border-box.
       this.$container.css({
         width: width,
@@ -334,6 +337,15 @@
         left: Math.round((Garnish.$win.width() - width) / 2),
         top: Math.round((Garnish.$win.height() - height) / 2),
       });
+
+      // Garnish fades the modal in with an inline `display: block`, which beats
+      // the stylesheet’s `display: flex` — so the body can’t rely on flex to fill
+      // the shell. Bound its height to the space between header and footer so it
+      // scrolls instead of overflowing the fixed-height, clipped container.
+      var chrome =
+        this.$container.children('.header').outerHeight() +
+        this.$container.children('.footer').outerHeight();
+      this.$body.css({ height: Math.max(height - chrome, 0), overflowY: 'auto' });
     },
 
     loadPage: function (page) {

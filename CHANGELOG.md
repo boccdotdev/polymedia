@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.2 - 2026-07-17
+
+### Fixed
+- The Browse Mux library modal now scrolls when the grid is taller than the viewport. Garnish fades the modal in with an inline `display: block` that overrode the shell's `display: flex`, so the body never filled the shell and its overflow was clipped by the fixed-height container. The body height is now set explicitly between the header and footer, so it scrolls and the footer stays reachable.
+
 ## 2.1.1 - 2026-07-17
 
 ### Fixed
