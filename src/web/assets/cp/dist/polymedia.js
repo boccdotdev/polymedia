@@ -361,8 +361,10 @@
       this.$grid.empty();
       this.$pager.empty();
 
+      // GET query args go in `params`; `data` becomes a request body that the
+      // server ignores, so page/limit would silently fall back to defaults.
       Craft.sendActionRequest('GET', 'polymedia/mux/library', {
-        data: { page: page, limit: this.limit },
+        params: { page: page, limit: this.limit },
       })
         .then(function (response) {
           self.loading = false;

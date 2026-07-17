@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.3 - 2026-07-17
+
+### Fixed
+- Browse Mux library pagination. The Next/Previous controls passed `page`/`limit` as `data` on a GET request, which becomes an ignored request body — so every page returned the first assets over again. They are now sent as query `params`.
+
 ## 2.1.2 - 2026-07-17
 
 ### Fixed
