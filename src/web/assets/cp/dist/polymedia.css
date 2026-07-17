@@ -33,7 +33,9 @@
     font-size: 18px;
 }
 
-.polymedia-mux-modal .body {
+/* .modal. prefix outranks Craft's `.modal .body { overflow: hidden }` (equal
+   class count otherwise — a load-order tie that clips the grid). */
+.modal.polymedia-mux-modal .body {
     padding: 16px 24px;
     overflow: auto;
     flex: 1 1 auto;
@@ -195,7 +197,8 @@
     font-size: 18px;
 }
 
-.polymedia-mux-upload-modal .body {
+/* Same cascade fix as the browse modal: outrank `.modal .body { overflow: hidden }`. */
+.modal.polymedia-mux-upload-modal .body {
     padding: 16px 24px 8px;
     flex: 1 1 auto;
     min-height: 0;

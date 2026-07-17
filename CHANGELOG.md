@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.1 - 2026-07-17
+
+### Fixed
+- Browse Mux library and Upload to Mux modals now scroll their content reliably. Craft's `.modal .body { overflow: hidden }` could win an equal-specificity cascade tie depending on CSS load order and clip the grid; the plugin rules now outrank it.
+
 ## 2.1.0 - 2026-07-13
 
 ### Added
