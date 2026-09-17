@@ -114,7 +114,7 @@ class Renderer extends Component
             . $trackHtml
             . Html::endTag($elementTag);
 
-        if ($isAudio && $poster !== null && $poster !== false) {
+        if ($isAudio && $poster !== null) {
             $mediaHtml .= Html::tag('img', '', [
                 'slot' => 'poster',
                 'src' => $poster,

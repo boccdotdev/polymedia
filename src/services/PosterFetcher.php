@@ -22,7 +22,6 @@ use craft\helpers\Json;
 use craft\helpers\StringHelper;
 use craft\models\VolumeFolder;
 use yii\base\Component;
-use yii\base\InvalidArgumentException;
 
 /**
  * Downloads a remote thumbnail into a local poster asset co-located with the
@@ -431,7 +430,7 @@ class PosterFetcher extends Component
             Plugin::getInstance()->getManifestWriter()->update($asset, [
                 'metadata' => $metadata,
             ]);
-        } catch (InvalidArgumentException|\Throwable $e) {
+        } catch (\Throwable $e) {
             Craft::warning(
                 "PosterFetcher could not update manifest metadata for asset #{$asset->id}: {$e->getMessage()}",
                 __METHOD__,

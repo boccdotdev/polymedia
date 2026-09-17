@@ -35,6 +35,7 @@
         "craftcms/ecs": "dev-main",
         "craftcms/phpstan": "dev-main",
         "codeception/codeception": "^5.0",
+        "phpstan/phpstan": "^2.2",
         "phpunit/phpunit": "^10.0"
     },
     "autoload": {

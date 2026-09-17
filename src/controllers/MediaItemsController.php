@@ -67,7 +67,7 @@ class MediaItemsController extends Controller
             ->title(Craft::t('polymedia', 'From URL'))
             ->contentTemplate('polymedia/_cp/create-screen', [
                 'providerTypes' => $providerTypes,
-                'folderId' => $folder?->id ?? '',
+                'folderId' => $folder->id ?? '',
                 'warnOnSignedUrl' => $settings->warnOnSignedUrlInPublicVolume,
                 'posterFieldConfig' => $plugin->getPosterFieldConfig($folder),
             ])

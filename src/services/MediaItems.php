@@ -263,7 +263,7 @@ class MediaItems extends Component
      * Returns media item records keyed by providerId for a batch of ids (one type).
      *
      * @param string $type media type key
-     * @param string[] $providerIds provider ids to look up
+     * @param array<int, string|null> $providerIds provider ids to look up
      * @return array<string, MediaItemRecord> keyed by providerId
      *
      * @author boccdotdev

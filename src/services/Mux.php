@@ -415,10 +415,6 @@ class Mux extends Component
         $fallback = null;
 
         foreach ($playbackIds as $playbackId) {
-            if (!$playbackId instanceof PlaybackID) {
-                continue;
-            }
-
             $id = $playbackId->getId();
             $policyValue = $this->_playbackPolicyValue($playbackId);
 
