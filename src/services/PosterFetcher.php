@@ -410,15 +410,21 @@ class PosterFetcher extends Component
     /**
      * Writes the remote thumbnail URL into record + manifest metadata.
      *
+     * Goes through {@see MediaItems::patchMetadata()} so a concurrent status
+     * write (queue job vs. sync/import) can't be lost to a stale merge.
+     *
      * @param MediaItemRecord $record
      * @param string $thumbnailUrl
      */
     private function _persistThumbnailUrl(MediaItemRecord $record, string $thumbnailUrl): void
     {
-        $metadata = $this->_decodeMetadata($record);
-        $metadata['thumbnail'] = $thumbnailUrl;
-        $record->metadata = Json::encode($metadata);
-        Plugin::getInstance()->getMediaItems()->save($record);
+        $metadata = Plugin::getInstance()->getMediaItems()->patchMetadata($record, [
+            'thumbnail' => $thumbnailUrl,
+        ]);
+
+        if ($metadata === null) {
+            return;
+        }
 
         $asset = Craft::$app->getAssets()->getAssetById((int)$record->assetId);
 

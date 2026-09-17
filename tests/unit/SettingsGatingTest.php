@@ -73,6 +73,58 @@ class SettingsGatingTest extends TestCase
         $this->assertCount(3, $mux->filterAssets($items, '  '));
     }
 
+    public function testMergeMuxAssetStateAppliesStatusDurationAndAssetId(): void
+    {
+        $result = MediaItems::mergeMuxAssetState(
+            ['thumbnail' => 'https://image.mux.com/pb1/thumbnail.jpg?time=0'],
+            null,
+            'asset-1',
+            ['status' => 'ready', 'duration' => 12.4, 'playbackId' => 'pb1'],
+        );
+
+        $this->assertTrue($result['changed']);
+        $this->assertSame('asset-1', $result['metadata']['muxAssetId']);
+        $this->assertSame('ready', $result['metadata']['muxStatus']);
+        // Concurrent writers' keys survive the merge.
+        $this->assertArrayHasKey('thumbnail', $result['metadata']);
+        $this->assertSame(12, $result['duration']);
+    }
+
+    public function testMergeMuxAssetStateIsIdempotent(): void
+    {
+        $first = MediaItems::mergeMuxAssetState([], null, 'asset-1', ['status' => 'ready', 'duration' => 30]);
+        $second = MediaItems::mergeMuxAssetState(
+            $first['metadata'],
+            $first['duration'],
+            'asset-1',
+            ['status' => 'ready', 'duration' => 30],
+        );
+
+        $this->assertTrue($first['changed']);
+        $this->assertFalse($second['changed']);
+        $this->assertSame($first['metadata'], $second['metadata']);
+        $this->assertSame($first['duration'], $second['duration']);
+    }
+
+    public function testMergeMuxAssetStateIgnoresEmptyAndInvalidValues(): void
+    {
+        $result = MediaItems::mergeMuxAssetState(
+            ['muxAssetId' => 'asset-1', 'muxStatus' => 'ready'],
+            30,
+            'asset-1',
+            ['status' => '', 'duration' => 'not-a-number'],
+        );
+
+        $this->assertFalse($result['changed']);
+        $this->assertSame('ready', $result['metadata']['muxStatus']);
+        $this->assertSame(30, $result['duration']);
+
+        // Zero/negative durations are Mux placeholders, not real lengths.
+        $zero = MediaItems::mergeMuxAssetState([], null, 'asset-1', ['duration' => 0]);
+        $this->assertSame(['muxAssetId' => 'asset-1'], $zero['metadata']);
+        $this->assertNull($zero['duration']);
+    }
+
     public function testDecodeMetadataJson(): void
     {
         $this->assertSame([], MediaItems::decodeMetadataJson(null));

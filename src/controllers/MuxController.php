@@ -372,13 +372,57 @@ class MuxController extends Controller
             ));
         }
 
-        $existing = $plugin->getMediaItems()->getByTypeAndProviderId('mux', $playbackId);
+        $resolvedMuxAssetId = (string)($muxAsset['assetId'] ?? $muxAssetId);
+
+        // Guards the exists-check + create against concurrent imports of the
+        // same Mux asset (double-clicks, two tabs), which would otherwise
+        // each pass the exists-check and create duplicate `.pmedia` assets.
+        $mutex = Craft::$app->getMutex();
+        $lockKey = "polymedia:mux-import:{$resolvedMuxAssetId}";
+
+        if (!$mutex->acquire($lockKey, 15)) {
+            return $this->asFailure(Craft::t(
+                'polymedia',
+                'This Mux asset is already being imported. Try again in a moment.',
+            ));
+        }
+
+        try {
+            return $this->_importLocked($muxAsset, $resolvedMuxAssetId, $playbackId, $folderId, $titleOverride, $successMessage);
+        } finally {
+            $mutex->release($lockKey);
+        }
+    }
+
+    /**
+     * Import body; runs while holding the per-Mux-asset import lock.
+     *
+     * @param array $muxAsset mapped Mux asset ({@see \boccdotdev\polymedia\services\Mux::mapAsset()})
+     * @param string $muxAssetId resolved Mux asset id
+     * @param string $playbackId public playback id
+     * @param ?int $folderId target folder for new imports
+     * @param string $titleOverride optional title
+     * @param string $successMessage success message for new creates
+     * @return Response
+     */
+    private function _importLocked(
+        array $muxAsset,
+        string $muxAssetId,
+        string $playbackId,
+        ?int $folderId,
+        string $titleOverride,
+        string $successMessage,
+    ): Response {
+        $plugin = Plugin::getInstance();
+        $mediaItems = $plugin->getMediaItems();
+        $existing = $mediaItems->getByTypeAndProviderId('mux', $playbackId);
 
         if ($existing) {
             $asset = Craft::$app->getAssets()->getAssetById((int)$existing->assetId);
 
             if ($asset) {
-                $plugin->getPosterFetcher()->ensureMuxPoster($existing, $playbackId);
+                // Re-import refreshes stored status/duration and the poster.
+                $mediaItems->applyMuxAssetState($muxAssetId, $muxAsset, $existing);
 
                 return $this->asSuccess(
                     Craft::t('polymedia', 'Already in Craft — using existing media item.'),
@@ -415,7 +459,7 @@ class MuxController extends Controller
 
         $thumbnail = $plugin->getMux()->firstFrameThumbnailUrl($playbackId);
         $extraMetadata = array_filter([
-            'muxAssetId' => $muxAsset['assetId'] ?? $muxAssetId,
+            'muxAssetId' => $muxAssetId,
             'muxStatus' => $muxAsset['status'] ?? null,
             'thumbnail' => $thumbnail,
         ], static fn($v) => $v !== null && $v !== '');
@@ -433,15 +477,12 @@ class MuxController extends Controller
             return $this->asFailure($e->getMessage());
         }
 
-        $record = $plugin->getMediaItems()->getByAssetId((int)$asset->id);
+        $record = $mediaItems->getByAssetId((int)$asset->id);
 
         if ($record) {
-            if (isset($muxAsset['duration']) && is_numeric($muxAsset['duration'])) {
-                $record->duration = (int)round((float)$muxAsset['duration']);
-                $plugin->getMediaItems()->save($record);
-            }
-
-            $plugin->getPosterFetcher()->ensureMuxPoster($record, $playbackId);
+            // Duration, status metadata, and the poster job all flow through
+            // the shared, lock-guarded state pipeline.
+            $mediaItems->applyMuxAssetState($muxAssetId, $muxAsset, $record);
         }
 
         return $this->asSuccess(
