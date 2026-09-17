@@ -122,6 +122,14 @@ class Settings extends Model
      */
     public bool $deleteMuxAssetOnDelete = false;
 
+    /**
+     * @var ?string Mux webhook signing secret. Supports env syntax
+     * (`$MUX_WEBHOOK_SECRET`). When empty, the webhook endpoint is disabled
+     * and status updates rely on polling/sync.
+     * @since 2.2.0
+     */
+    public ?string $muxWebhookSecret = null;
+
     // Public Methods
     // =========================================================================
 
@@ -133,7 +141,7 @@ class Settings extends Model
         $rules = parent::defineRules();
 
         $rules[] = [['mediaChromeVersion', 'scriptLoaderMode', 'cdnHost'], 'required'];
-        $rules[] = [['mediaChromeVersion', 'cdnHost', 'muxTokenId', 'muxTokenSecret'], 'string'];
+        $rules[] = [['mediaChromeVersion', 'cdnHost', 'muxTokenId', 'muxTokenSecret', 'muxWebhookSecret'], 'string'];
         $rules[] = [['selfHostBaseUrl'], 'string'];
         $rules[] = [['defaultVolumeUid', 'attachmentsVolumeUid'], 'string', 'max' => 36];
         $rules[] = [['scriptLoaderMode'], 'in', 'range' => ['cdn', 'self-host', 'none']];

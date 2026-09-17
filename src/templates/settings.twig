@@ -191,6 +191,25 @@
         on: settings.deleteMuxAssetOnDelete,
         disabled: not allowAdminChanges,
     }) }}
+
+    {{ forms.autosuggestField({
+        label: 'Mux Webhook Signing Secret'|t('polymedia'),
+        instructions: 'Optional. When set, Mux webhooks keep item status and posters current without polling; leave empty to disable the webhook endpoint. Each Mux environment’s webhook has its own secret. Supports env vars (`$MUX_WEBHOOK_SECRET`).'|t('polymedia'),
+        id: 'muxWebhookSecret',
+        name: 'muxWebhookSecret',
+        value: settings.muxWebhookSecret,
+        suggestEnvVars: true,
+        errors: settings.getErrors('muxWebhookSecret'),
+        disabled: not allowAdminChanges,
+    }) }}
+
+    {{ forms.copytextField({
+        label: 'Webhook URL'|t('polymedia'),
+        instructions: 'Add this URL as a webhook in the Mux dashboard (Settings → Webhooks) for the environment your tokens belong to.'|t('polymedia'),
+        id: 'muxWebhookUrl',
+        class: 'code',
+        value: muxWebhookUrl,
+    }) }}
 {% endif %}
 
 <hr>

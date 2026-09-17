@@ -72,6 +72,77 @@ Optional setting **Delete Mux asset when Craft asset is deleted** (default **off
 
 **Notes on delete-from-Mux:** the remote delete runs **synchronously** in the hard-delete request (not a queue job). Deleting many Mux items at once may take longer. If the site is on **Lite** or credentials are missing while this setting is still on, Craft logs a **warning** and skips the Mux API call (the remote asset may remain until deleted in Mux).
 
+### Mux status updates: polling, sync, and webhooks (Pro)
+
+A Mux item's processing status (`preparing` / `ready` / `errored`) and duration are stored on the media item. Webhooks are optional. The upload flow and console command still work without them:
+
+1. **Polling (default, zero setup).** The Upload to Mux modal polls until the asset is ready and stores its status.
+2. **Console sync.** Pull current state from the Mux API for every imported item (or one), fetching posters for newly ready assets. Safe to re-run; also repairs items that missed a webhook:
+
+   ```
+   ./craft polymedia/mux/sync-status
+   ./craft polymedia/mux/sync-status --mux-asset-id=<id>
+   ```
+
+3. **Webhooks (optional).** Mux pushes `video.asset.*` events (ready, errored, updated, deleted) to your site. This keeps status and posters current after the editor closes the upload modal. The modal can continue polling while it is open.
+
+#### Webhook setup
+
+1. In the [Mux dashboard](https://dashboard.mux.com/) open **Settings → Webhooks**, pick the **same environment** your API tokens belong to, and click **Create new webhook**.
+2. **URL to notify:** copy the **Webhook URL** shown in **Settings → Plugins → Polymedia → Mux** (it's `https://your-site/actions/polymedia/webhooks/mux`).
+3. Mux generates a **signing secret** for the webhook. Put it in your `.env` (e.g. `MUX_WEBHOOK_SECRET=…`) and set **Mux Webhook Signing Secret** to `$MUX_WEBHOOK_SECRET`.
+
+Every delivery is verified against the signing secret (HMAC, with a replay-window check); the endpoint is disabled entirely while no secret is set. Deliveries for videos that aren't in Craft are acknowledged and ignored. `video.asset.deleted` only marks the item's stored status — it never deletes the Craft asset.
+
+Each Mux **environment** has its own webhooks and secrets, so configure one per environment and keep the secret in that environment's `.env`.
+
+#### Webhooks on local dev
+
+Polling and `sync-status` cover local development without any webhook setup. When you do need to test webhooks, the [Mux CLI](https://www.mux.com/docs/core/listen-for-webhooks) is the simplest option. It forwards events to the site without exposing your computer to the internet:
+
+```
+npx @mux/cli login
+npx @mux/cli webhooks listen \
+  --forward-to http://your-site.ddev.site/actions/polymedia/webhooks/mux
+```
+
+The listener prints a local signing secret. Set `MUX_WEBHOOK_SECRET` to that value and keep the Polymedia setting as `$MUX_WEBHOOK_SECRET`. The CLI reuses this secret for the selected Mux environment.
+
+Create or update a video in that Mux environment to receive a real event. You can also check the endpoint and signature handling with a synthetic event:
+
+```
+npx @mux/cli webhooks trigger video.asset.ready \
+  --forward-to http://your-site.ddev.site/actions/polymedia/webhooks/mux
+```
+
+Synthetic events usually refer to an asset that does not exist in Craft. Polymedia returns `200` and ignores that item, which still confirms that forwarding and signature verification work.
+
+The CLI signing secret and a dashboard webhook's signing secret are different. Set `MUX_WEBHOOK_SECRET` to the secret for the delivery method you are testing.
+
+##### Testing dashboard delivery through a tunnel
+
+Use a tunnel when you need to test the full Mux dashboard to local-site route. Add the tunnel URL as a webhook in the development Mux environment, then use the signing secret generated for that dashboard webhook.
+
+- **Tailscale Funnel** has a stable URL. With DDEV, allow the router to answer for your tailnet hostname, then open the funnel:
+
+  ```yaml
+  # .ddev/config.yaml
+  additional_fqdns:
+    - your-machine.your-tailnet.ts.net
+  ```
+
+  ```
+  ddev restart
+  tailscale funnel --bg --https=443 https+insecure://127.0.0.1:443
+  ```
+
+  Webhook URL: `https://your-machine.your-tailnet.ts.net/actions/polymedia/webhooks/mux`
+
+- **ngrok:** `ddev share` (DDEV's built-in ngrok wrapper). Free-tier URLs rotate per run, so re-paste the URL in the Mux dashboard each session.
+- **Cloudflare quick tunnel:** `cloudflared tunnel --url https://your-site.ddev.site`. It needs no account, but the URL rotates per run.
+
+Use a **separate Mux environment for development** so local experiments never receive (or miss) production events.
+
 ### Per-item folders
 
 Each `.pmedia` is created inside its own folder (named after the title slug plus a short uid), keeping its poster and track files together and the parent volume tidy. Hard-deleting the item removes the folder and everything in it.

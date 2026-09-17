@@ -138,6 +138,140 @@ class Mux extends Component
     }
 
     /**
+     * Returns the resolved Mux webhook signing secret (env vars expanded).
+     *
+     * @return string
+     *
+     * @author boccdotdev
+     * @since 2.2.0
+     */
+    public function getWebhookSecret(): string
+    {
+        $raw = Plugin::getInstance()->getSettings()->muxWebhookSecret;
+
+        if ($raw === null || $raw === '') {
+            return '';
+        }
+
+        return (string)(App::parseEnv($raw) ?: '');
+    }
+
+    /**
+     * Verifies a `Mux-Signature` webhook header against a raw request body.
+     *
+     * The header carries `t=<unix ts>,v1=<hex hmac>` where the HMAC is
+     * SHA-256 over `"<t>.<body>"` with the webhook signing secret. Multiple
+     * `v1` entries may appear during secret rotation — any match passes.
+     * Signatures older than `$tolerance` seconds are rejected (replay guard).
+     *
+     * Pure function — exposed static for unit testing.
+     *
+     * @param string $payload the raw request body
+     * @param string $header the `Mux-Signature` header value
+     * @param string $secret the webhook signing secret
+     * @param int $tolerance max signature age in seconds
+     * @param ?int $now current unix time override (tests)
+     * @return bool
+     *
+     * @author boccdotdev
+     * @since 2.2.0
+     */
+    public static function verifyWebhookSignature(
+        string $payload,
+        string $header,
+        string $secret,
+        int $tolerance = 300,
+        ?int $now = null,
+    ): bool {
+        if ($secret === '' || $header === '') {
+            return false;
+        }
+
+        $timestamp = null;
+        $candidates = [];
+
+        foreach (explode(',', $header) as $part) {
+            $pair = explode('=', trim($part), 2);
+
+            if (count($pair) !== 2) {
+                continue;
+            }
+
+            if ($pair[0] === 't' && ctype_digit($pair[1])) {
+                $timestamp = (int)$pair[1];
+            } elseif ($pair[0] === 'v1' && $pair[1] !== '') {
+                $candidates[] = $pair[1];
+            }
+        }
+
+        if ($timestamp === null || $candidates === []) {
+            return false;
+        }
+
+        if (abs(($now ?? time()) - $timestamp) > $tolerance) {
+            return false;
+        }
+
+        $expected = hash_hmac('sha256', "{$timestamp}.{$payload}", $secret);
+
+        foreach ($candidates as $candidate) {
+            if (hash_equals($expected, $candidate)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Maps a webhook `video.asset.*` event's `data` object to the same state
+     * shape as {@see mapAsset()}, without an API round-trip.
+     *
+     * Picks the first public playback id (else the first of any policy),
+     * matching the import flow's preference.
+     *
+     * @param array $data the event's `data` payload (a Mux asset object)
+     * @return array{assetId: string, playbackId: ?string, playbackPolicy: ?string, status: string, duration: mixed}
+     *
+     * @author boccdotdev
+     * @since 2.2.0
+     */
+    public static function mapWebhookAssetData(array $data): array
+    {
+        $playbackId = null;
+        $playbackPolicy = null;
+
+        foreach ((array)($data['playback_ids'] ?? []) as $playback) {
+            $id = isset($playback['id']) ? (string)$playback['id'] : '';
+
+            if ($id === '') {
+                continue;
+            }
+
+            $policy = isset($playback['policy']) ? (string)$playback['policy'] : null;
+
+            if ($playbackId === null) {
+                $playbackId = $id;
+                $playbackPolicy = $policy;
+            }
+
+            if ($policy === 'public') {
+                $playbackId = $id;
+                $playbackPolicy = $policy;
+                break;
+            }
+        }
+
+        return [
+            'assetId' => isset($data['id']) ? (string)$data['id'] : '',
+            'playbackId' => $playbackId,
+            'playbackPolicy' => $playbackPolicy,
+            'status' => isset($data['status']) ? (string)$data['status'] : '',
+            'duration' => $data['duration'] ?? null,
+        ];
+    }
+
+    /**
      * Lists Mux assets as CP-friendly DTOs.
      *
      * Each item includes: `assetId`, `playbackId`, `title`, `status`,

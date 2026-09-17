@@ -422,9 +422,9 @@ class MediaItems extends Component
      * Applies current Mux asset state to the matching media item.
      *
      * The one idempotent, lock-guarded transition shared by the CP
-     * import/upload flow and the console sync command (and any future push
-     * source): stores `muxStatus`/`muxAssetId` metadata, updates the duration,
-     * and kicks the poster fetcher once the asset is ready.
+     * import/upload flow, console sync command, and webhook endpoint: stores
+     * `muxStatus`/`muxAssetId` metadata, updates the duration, and kicks the
+     * poster fetcher once the asset is ready.
      *
      * @param string $muxAssetId the Mux asset id
      * @param array $state mapped asset state ({@see Mux::mapAsset()}): uses
@@ -480,8 +480,8 @@ class MediaItems extends Component
         // Outside the lock: poster ensure is internally idempotent (no-ops
         // when a poster is attached, probes the CDN, queues retries while the
         // still isn't ready) and may do HTTP — keep it off the critical path.
-        // Skipped only for errored assets, which will never produce a frame.
-        if (($state['status'] ?? null) !== 'errored') {
+        // Skipped for errored/deleted assets, which will never produce a frame.
+        if (!in_array($state['status'] ?? null, ['errored', 'deleted'], true)) {
             Plugin::getInstance()->getPosterFetcher()->ensureMuxPoster($record, $playbackId ?: null);
         }
 

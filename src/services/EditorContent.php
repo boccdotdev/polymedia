@@ -330,12 +330,16 @@ class EditorContent extends Component
             );
         }
 
+        $instructions = Plugin::getInstance()->getMux()->getWebhookSecret() !== ''
+            ? Craft::t('polymedia', 'Status updates automatically via Mux webhooks.')
+            : Craft::t(
+                'polymedia',
+                'Status is stored when the item is imported or uploaded. Refresh with `polymedia/mux/sync-status` or by re-importing from the Mux library.',
+            );
+
         $html .= Html::tag(
             'p',
-            Craft::t(
-                'polymedia',
-                'Status is stored when the item is imported or uploaded. Refresh by re-importing from the Mux library if needed.',
-            ),
+            $instructions,
             ['class' => 'instructions'],
         );
 

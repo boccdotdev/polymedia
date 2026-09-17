@@ -32,6 +32,7 @@ class SettingsGatingTest extends TestCase
 
         $this->assertNull($settings->muxTokenId);
         $this->assertNull($settings->muxTokenSecret);
+        $this->assertNull($settings->muxWebhookSecret);
         $this->assertFalse($settings->deleteMuxAssetOnDelete);
         $this->assertTrue($settings->autoFetchPoster);
     }
@@ -71,6 +72,57 @@ class SettingsGatingTest extends TestCase
         $this->assertSame('xYz789', $mux->filterAssets($items, 'XYZ')[0]['playbackId']);
         $this->assertSame([], $mux->filterAssets($items, 'no-such-video'));
         $this->assertCount(3, $mux->filterAssets($items, '  '));
+    }
+
+    public function testVerifyWebhookSignature(): void
+    {
+        $secret = 'whsec_test';
+        $payload = '{"type":"video.asset.ready","data":{"id":"a1"}}';
+        $now = 1_700_000_000;
+        $header = 't=' . $now . ',v1=' . hash_hmac('sha256', $now . '.' . $payload, $secret);
+
+        $this->assertTrue(Mux::verifyWebhookSignature($payload, $header, $secret, 300, $now));
+        // A rotated-in second v1 candidate still passes.
+        $this->assertTrue(Mux::verifyWebhookSignature($payload, $header . ',v1=deadbeef', $secret, 300, $now));
+
+        // Tampered body, wrong secret, stale timestamp, malformed/missing header, empty secret.
+        $this->assertFalse(Mux::verifyWebhookSignature($payload . 'x', $header, $secret, 300, $now));
+        $this->assertFalse(Mux::verifyWebhookSignature($payload, $header, 'other-secret', 300, $now));
+        $this->assertFalse(Mux::verifyWebhookSignature($payload, $header, $secret, 300, $now + 301));
+        $this->assertFalse(Mux::verifyWebhookSignature($payload, 'v1=abc', $secret, 300, $now));
+        $this->assertFalse(Mux::verifyWebhookSignature($payload, '', $secret, 300, $now));
+        $this->assertFalse(Mux::verifyWebhookSignature($payload, $header, '', 300, $now));
+    }
+
+    public function testMapWebhookAssetDataPrefersPublicPlayback(): void
+    {
+        $state = Mux::mapWebhookAssetData([
+            'id' => 'asset-1',
+            'status' => 'ready',
+            'duration' => 24.1,
+            'playback_ids' => [
+                ['id' => 'signed-pb', 'policy' => 'signed'],
+                ['id' => 'public-pb', 'policy' => 'public'],
+            ],
+        ]);
+
+        $this->assertSame('asset-1', $state['assetId']);
+        $this->assertSame('public-pb', $state['playbackId']);
+        $this->assertSame('public', $state['playbackPolicy']);
+        $this->assertSame('ready', $state['status']);
+        $this->assertSame(24.1, $state['duration']);
+
+        // Falls back to the first playback id when none are public.
+        $signedOnly = Mux::mapWebhookAssetData([
+            'id' => 'asset-2',
+            'playback_ids' => [['id' => 'signed-pb', 'policy' => 'signed']],
+        ]);
+        $this->assertSame('signed-pb', $signedOnly['playbackId']);
+
+        // Degrades cleanly on an empty payload.
+        $empty = Mux::mapWebhookAssetData([]);
+        $this->assertSame('', $empty['assetId']);
+        $this->assertNull($empty['playbackId']);
     }
 
     public function testMergeMuxAssetStateAppliesStatusDurationAndAssetId(): void

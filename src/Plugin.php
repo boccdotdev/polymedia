@@ -62,6 +62,7 @@ use craft\helpers\Cp;
 use craft\helpers\Gql as GqlHelper;
 use craft\helpers\Html;
 use craft\helpers\Json;
+use craft\helpers\UrlHelper;
 use craft\models\VolumeFolder;
 use craft\services\Assets as AssetsService;
 use craft\services\Fields;
@@ -392,6 +393,10 @@ class Plugin extends BasePlugin
             'volumeOptions' => $volumeOptions,
             'isPro' => $this->getIsPro(),
             'muxConfigured' => $this->getMux()->isConfigured(),
+            // Site action URL (actionUrl() would prepend the CP trigger here).
+            'muxWebhookUrl' => UrlHelper::siteUrl(
+                Craft::$app->getConfig()->getGeneral()->actionTrigger . '/polymedia/webhooks/mux',
+            ),
         ]);
     }
 
