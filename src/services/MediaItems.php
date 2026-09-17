@@ -263,7 +263,7 @@ class MediaItems extends Component
      * Returns media item records keyed by providerId for a batch of ids (one type).
      *
      * @param string $type media type key
-     * @param string[] $providerIds provider ids to look up
+     * @param array<int, string|null> $providerIds provider ids to look up
      * @return array<string, MediaItemRecord> keyed by providerId
      *
      * @author boccdotdev
@@ -271,7 +271,10 @@ class MediaItems extends Component
      */
     public function getByTypeAndProviderIds(string $type, array $providerIds): array
     {
-        $providerIds = array_values(array_unique(array_filter($providerIds, static fn($id) => $id !== null && $id !== '')));
+        $providerIds = array_values(array_unique(array_filter(
+            $providerIds,
+            static fn(mixed $id): bool => $id !== null && $id !== '',
+        )));
 
         if ($type === '' || $providerIds === []) {
             return [];

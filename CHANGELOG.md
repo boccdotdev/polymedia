@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- A dedicated sidecar volume for Polymedia-managed posters and WebVTT files. New installations create a public local **Polymedia Sidecars** volume; existing installations can create it with `polymedia/setup/sidecar-volume` or select any Craft volume, including one backed by S3 or Google Cloud.
+- `polymedia/migrate/sidecars` moves attached files out of legacy generated folders and flattens their `.pmedia` manifests. It supports `--dry-run` and deliberately leaves old folders for manual review.
+
+### Changed
+- New `.pmedia` manifests are created directly in the editor's chosen folder rather than inside generated per-item folders.
+- Polymedia hides the configured sidecar volume from asset indexes and pickers. Existing library assets selected as posters or tracks remain in their original volume.
+- The old `polymedia/migrate/folders` command is retired because it creates the storage layout this release replaces.
+
+### Fixed
+- Hard-deleting a moved `.pmedia` can no longer delete its containing asset folder. Cleanup is restricted to the exact asset-UID folder in the configured sidecar volume.
+- Flat folders support duplicate media titles by asking Craft for a collision-free `.pmedia` filename.
+
 ## 2.1.3 - 2026-07-17
 
 ### Fixed
