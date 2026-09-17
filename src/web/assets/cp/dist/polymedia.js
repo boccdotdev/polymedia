@@ -257,8 +257,7 @@
      *
      * Passes a minimal element reference through Craft's normal selector
      * callback. The field input renders the selected asset by id, so this also
-     * works when the asset lives in a per-item subfolder that isn't visible in
-     * the selector's current source.
+     * works when the asset isn't visible in the selector's current source.
      *
      * @param {?Craft.AssetIndex} assetIndex
      * @param {?number} assetId the Craft asset id to select

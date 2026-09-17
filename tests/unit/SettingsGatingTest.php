@@ -33,6 +33,7 @@ class SettingsGatingTest extends TestCase
         $this->assertNull($settings->muxTokenId);
         $this->assertNull($settings->muxTokenSecret);
         $this->assertNull($settings->muxWebhookSecret);
+        $this->assertNull($settings->sidecarVolumeUid);
         $this->assertFalse($settings->deleteMuxAssetOnDelete);
         $this->assertTrue($settings->autoFetchPoster);
     }

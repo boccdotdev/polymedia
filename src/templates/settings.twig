@@ -15,7 +15,29 @@
     disabled: not allowAdminChanges,
 }) }}
 
-{# attachmentsVolumeUid: dead setting — property kept for project config BC; UI removed in 1.2.2 #}
+{{ forms.selectField({
+    label: 'Sidecar Volume'|t('polymedia'),
+    instructions: 'A dedicated volume for poster images and WebVTT files managed by Polymedia. The plugin hides this volume from asset indexes and pickers.'|t('polymedia'),
+    id: 'sidecarVolumeUid',
+    name: 'sidecarVolumeUid',
+    value: settings.sidecarVolumeUid,
+    options: volumeOptions,
+    errors: settings.getErrors('sidecarVolumeUid'),
+    disabled: not allowAdminChanges,
+}) }}
+
+{% if not settings.sidecarVolumeUid %}
+    <div class="readable">
+        <blockquote class="note warning">
+            <p>
+                {{ 'No sidecar volume is selected. Polymedia will not create local poster or WebVTT assets until one is configured.'|t('polymedia') }}
+            </p>
+            <p>
+                {{ 'Create the default public local volume with `php craft polymedia/setup/sidecar-volume`, or create a volume backed by S3, Google Cloud, or another filesystem and select it here.'|t('polymedia') }}
+            </p>
+        </blockquote>
+    </div>
+{% endif %}
 
 <hr>
 
@@ -110,7 +132,7 @@
 
 {{ forms.lightswitchField({
     label: 'Auto-Fetch Poster'|t('polymedia'),
-    instructions: 'When adding a media URL without a custom poster, download a provider thumbnail (Mux first frame, YouTube/Vimeo stills, etc.) into the item folder. Mux library imports always fetch a poster when none is set.'|t('polymedia'),
+    instructions: 'When adding a media URL without a custom poster, download a provider thumbnail (Mux first frame, YouTube/Vimeo stills, etc.) into the sidecar volume. Mux library imports always fetch a poster when none is set.'|t('polymedia'),
     id: 'autoFetchPoster',
     name: 'autoFetchPoster',
     on: settings.autoFetchPoster,

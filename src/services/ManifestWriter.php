@@ -20,7 +20,6 @@ use craft\elements\Asset;
 use craft\helpers\Assets;
 use craft\helpers\Json;
 use craft\helpers\StringHelper;
-use craft\models\VolumeFolder;
 use yii\base\Component;
 use yii\base\InvalidArgumentException;
 
@@ -68,10 +67,10 @@ class ManifestWriter extends Component
         if ($slug === '') {
             $slug = 'media';
         }
-        $folderName = $this->itemFolderName($title);
-        $filename = "{$slug}.pmedia";
-
-        $itemFolderId = $this->_ensureItemFolderId($volumeId, $folderId, $folderName);
+        $filename = Craft::$app->getAssets()->getNameReplacementInFolder(
+            "{$slug}.pmedia",
+            $folderId,
+        );
 
         $tmp = Assets::tempFilePath('pmedia');
         file_put_contents($tmp, $json);
@@ -79,7 +78,7 @@ class ManifestWriter extends Component
         $asset = new Asset();
         $asset->tempFilePath = $tmp;
         $asset->filename = $filename;
-        $asset->newFolderId = $itemFolderId;
+        $asset->newFolderId = $folderId;
         $asset->volumeId = $volumeId;
         $asset->title = $title;
         $asset->setScenario(Asset::SCENARIO_CREATE);
@@ -211,95 +210,8 @@ class ManifestWriter extends Component
         }
     }
 
-    /**
-     * Determines whether a folder is a dedicated single-item folder.
-     *
-     * A `.pmedia` that lives alone in a non-root folder is considered to be in
-     * its own dedicated folder. This is a structural signal — it survives the
-     * filename being re-slugified on edit, unlike a name-matching heuristic.
-     *
-     * @param VolumeFolder $folder the folder to test
-     * @param ?int $excludeAssetId an asset to exclude from the count (e.g. the
-     *                             one being deleted, which may still be present)
-     * @return bool
-     *
-     * @author boccdotdev
-     * @since 1.2.0
-     */
-    public function isDedicatedItemFolder(VolumeFolder $folder, ?int $excludeAssetId = null): bool
-    {
-        if (!$folder->parentId) {
-            return false;
-        }
-
-        $query = Asset::find()
-            ->folderId($folder->id)
-            ->kind('polymedia')
-            ->status(null);
-
-        if ($excludeAssetId !== null) {
-            $query->id(['not', $excludeAssetId]);
-        }
-
-        return $query->count() === 0;
-    }
-
-    /**
-     * Builds a unique per-item folder name from some base text — a slug plus a
-     * short random suffix (e.g. `my-video-a1b2c3d4`).
-     *
-     * Shared by item creation and the folder migration command so both produce
-     * the same naming scheme.
-     *
-     * @param string $base the text to slugify (a title or filename stem)
-     * @return string
-     *
-     * @author boccdotdev
-     * @since 1.2.0
-     */
-    public function itemFolderName(string $base): string
-    {
-        $slug = StringHelper::slugify($base);
-
-        if ($slug === '') {
-            $slug = 'media';
-        }
-
-        return $slug . '-' . StringHelper::randomString(8);
-    }
-
     // Private Methods
     // =========================================================================
-
-    /**
-     * Ensures a dedicated subfolder exists for a media item and returns its ID.
-     *
-     * Each `.pmedia` lives in its own folder (named after the file stem) so its
-     * poster and track files can sit alongside it, keeping the volume tidy. If
-     * the target folder or volume can't be resolved, the original folder is used.
-     *
-     * @param int $volumeId the target volume ID
-     * @param int $parentFolderId the folder the item is being added to
-     * @param string $name the subfolder name (the `.pmedia` file stem)
-     * @return int the item folder ID
-     *
-     * @author boccdotdev
-     * @since 1.2.0
-     */
-    private function _ensureItemFolderId(int $volumeId, int $parentFolderId, string $name): int
-    {
-        $assets = Craft::$app->getAssets();
-        $parent = $assets->getFolderById($parentFolderId);
-        $volume = Craft::$app->getVolumes()->getVolumeById($volumeId);
-
-        if (!$parent || !$volume) {
-            return $parentFolderId;
-        }
-
-        $folder = $assets->ensureFolderByFullPathAndVolume($parent->path . $name, $volume, false);
-
-        return (int)$folder->id;
-    }
 
     /**
      * Builds the manifest array.

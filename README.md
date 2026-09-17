@@ -54,7 +54,7 @@ No volume picker — the target follows your current location, falling back to t
 
 For providers that can't be auto-detected (Shaka, Video.js, PeerTube), use the "Force Type" dropdown.
 
-You can also set a poster image right on the **From URL** screen — image-only, with inline upload landing in the new item's folder. Posters and tracks can still be managed later on the asset edit screen.
+You can also set a poster image right on the **From URL** screen. Existing library images stay where they are. Inline uploads land in the plugin's sidecar volume. Posters and tracks can still be managed later on the asset edit screen.
 
 ### Mux library & upload (Pro)
 
@@ -143,18 +143,46 @@ Use a tunnel when you need to test the full Mux dashboard to local-site route. A
 
 Use a **separate Mux environment for development** so local experiments never receive (or miss) production events.
 
-### Per-item folders
+### Sidecar volume
 
-Each `.pmedia` is created inside its own folder (named after the title slug plus a short uid), keeping its poster and track files together and the parent volume tidy. Hard-deleting the item removes the folder and everything in it.
+`.pmedia` manifests stay directly in the folder where the editor creates or moves them. Polymedia stores files it manages, such as fetched posters and inline-uploaded WebVTT tracks, in a separate **sidecar volume**. The plugin hides that volume from asset indexes and pickers. Existing images or tracks selected from another asset volume stay in place and are never deleted by Polymedia.
 
-To reorganise items created before this behaviour existed, run:
+New installations create a public local filesystem and volume named **Polymedia Sidecars**:
 
+- Base path: `@webroot/polymedia-sidecars`
+- Base URL: `@web/polymedia-sidecars`
+
+For an existing installation, create the same default volume with:
+
+```bash
+php craft polymedia/setup/sidecar-volume --dry-run
+php craft polymedia/setup/sidecar-volume
 ```
-./craft polymedia/migrate/folders --dry-run   # preview
-./craft polymedia/migrate/folders             # apply
+
+The path and URL are configurable:
+
+```bash
+php craft polymedia/setup/sidecar-volume \
+  --path='$POLYMEDIA_SIDECAR_PATH' \
+  --url='$POLYMEDIA_SIDECAR_URL'
 ```
 
-Items already in their own folder are skipped, so it's safe to re-run.
+Keep a local sidecar path outside every other Craft filesystem's base path, otherwise another volume may index the same files. The directory must also persist across deployments.
+
+To use S3, Google Cloud Storage, or another remote filesystem, create a dedicated Craft filesystem and volume, then select it under **Settings → Plugins → Polymedia → Sidecar Volume**. You can also change the filesystem used by the auto-created volume without changing its Polymedia setting. After selecting a different volume, run `php craft polymedia/migrate/sidecars` to move existing managed files into it.
+
+Editors who use the inline poster or WebVTT upload controls need permission to save assets in the sidecar volume. Polymedia still removes the volume from their Assets index.
+
+#### Migrating items created by Polymedia 1.2–2.1
+
+After configuring the sidecar volume, preview and apply the migration:
+
+```bash
+php craft polymedia/migrate/sidecars --dry-run
+php craft polymedia/migrate/sidecars
+```
+
+The command moves attached files only from folders matching Polymedia's old generated naming convention, then moves each `.pmedia` into its parent folder. It never deletes a legacy folder. Review and remove empty folders from the Assets index after the migration.
 
 ## Front-End Setup
 
@@ -372,18 +400,16 @@ For audio types, the poster is emitted as `<img slot="poster" class="polymedia-c
 When creating media **without** a user-selected poster:
 
 1. **User poster** (create screen or asset editor) always wins — never overwritten by auto-fetch.
-2. Else if **Auto-Fetch Poster** is on (URL create), or always for **Mux library/upload** imports: download a still into the item’s dedicated folder and attach it as the poster.
+2. Else if **Auto-Fetch Poster** is on (URL create), or always for **Mux library/upload** imports: download a still into the item's folder in the sidecar volume and attach it as the poster.
 3. **Mux** uses the Image API first frame: `https://image.mux.com/{playbackId}/thumbnail.jpg?time=0` (Mux’s default without `time` is mid-video).
 4. If the Mux image is not ready yet, a queue job retries with backoff.
 5. Last resort: remote thumbnail URL only in manifest metadata (CP may show it until a local poster exists).
 
 CP asset index / picker thumbs for `.pmedia` files use the related poster when present, else the remote thumbnail URL.
 
-**Folder covers:** Craft has no first-class folder-cover API. Posters are co-located in each item’s dedicated folder so folder contents show the image; the parent index still uses Craft’s folder icon for the folder row itself.
-
 ## Accessibility
 
-Attach `.vtt` files to video items via the asset edit screen, in three roles: **Captions**, **Subtitles**, and **Descriptions**. Each role is a multi-select picker that can also upload straight into the item's folder. The pickers appear only on video items (audio items show the poster picker alone).
+Attach `.vtt` files to video items via the asset edit screen, in three roles: **Captions**, **Subtitles**, and **Descriptions**. Each role is a multi-select picker that uploads into the item's folder in the sidecar volume. The pickers appear only on video items (audio items show the poster picker alone).
 
 Tracks are site-scoped — attach different language files to different Craft sites. On save, each track's `srclang` and `label` are derived from the current site (primary language subtag and locale display name).
 

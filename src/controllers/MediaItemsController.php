@@ -13,6 +13,7 @@ namespace boccdotdev\polymedia\controllers;
 
 use boccdotdev\polymedia\models\Settings;
 use boccdotdev\polymedia\Plugin;
+use boccdotdev\polymedia\records\MediaItemRecord;
 use Craft;
 use craft\elements\Asset;
 use craft\elements\User;
@@ -62,6 +63,7 @@ class MediaItemsController extends Controller
         $currentUser = Craft::$app->getUser()->getIdentity();
         $folderId = (int)Craft::$app->getRequest()->getParam('folderId') ?: null;
         $folder = $this->_resolveFolder($folderId, $currentUser, $settings);
+        $posterUploadFolder = $plugin->getSidecarStorage()->getRootFolder();
 
         return $this->asCpScreen()
             ->title(Craft::t('polymedia', 'From URL'))
@@ -69,7 +71,7 @@ class MediaItemsController extends Controller
                 'providerTypes' => $providerTypes,
                 'folderId' => $folder->id ?? '',
                 'warnOnSignedUrl' => $settings->warnOnSignedUrlInPublicVolume,
-                'posterFieldConfig' => $plugin->getPosterFieldConfig($folder),
+                'posterFieldConfig' => $plugin->getPosterFieldConfig($posterUploadFolder),
             ])
             ->action('polymedia/media-items/create')
             ->submitButtonLabel(Craft::t('polymedia', 'Save'));
@@ -146,7 +148,7 @@ class MediaItemsController extends Controller
 
         if ($hasUserPoster && $record) {
             $plugin->savePoster($record, $posterIds);
-            $this->_coLocatePoster($posterIds, (int)$folder->id, $asset);
+            $this->_adoptPosterUpload($posterIds, $record);
         } elseif ($record && $settings->autoFetchPoster) {
             // User poster wins; otherwise download a derived still when enabled.
             if ($detection->type === 'mux' && $detection->providerId !== '') {
@@ -169,19 +171,18 @@ class MediaItemsController extends Controller
     // =========================================================================
 
     /**
-     * Moves a poster uploaded on the create screen into the new item's folder.
+     * Moves a poster uploaded on the create screen into its managed sidecar folder.
      *
-     * Inline uploads land in the folder the user was browsing; this co-locates
-     * them with the `.pmedia` so each item's files stay together. A poster that
-     * already lives elsewhere (a pre-existing asset the user selected) is left
-     * where it is, since it may be shared.
+     * Only assets in the sidecar volume root are adopted. A pre-existing asset
+     * selected from the user's library is left where it is and may be shared.
      *
      * @param mixed $posterIds the submitted poster value
-     * @param int $parentFolderId the folder the user was browsing
-     * @param Asset $asset the newly created `.pmedia` asset
+     * @param MediaItemRecord $record the new media item
      */
-    private function _coLocatePoster(mixed $posterIds, int $parentFolderId, Asset $asset): void
-    {
+    private function _adoptPosterUpload(
+        mixed $posterIds,
+        MediaItemRecord $record,
+    ): void {
         $posterAssetId = is_array($posterIds) ? (int)($posterIds[0] ?? 0) : (int)$posterIds;
 
         if (!$posterAssetId) {
@@ -191,11 +192,11 @@ class MediaItemsController extends Controller
         $assets = Craft::$app->getAssets();
         $poster = $assets->getAssetById($posterAssetId);
 
-        if (!$poster || $poster->folderId !== $parentFolderId) {
+        if (!$poster) {
             return;
         }
 
-        $assets->moveAsset($poster, $asset->getFolder());
+        Plugin::getInstance()->getSidecarStorage()->adoptRootUpload($poster, $record);
     }
 
     /**

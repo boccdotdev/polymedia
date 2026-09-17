@@ -24,8 +24,8 @@ use craft\models\VolumeFolder;
 use yii\base\Component;
 
 /**
- * Downloads a remote thumbnail into a local poster asset co-located with the
- * `.pmedia` item folder and attaches it via {@see RelatedAssets}.
+ * Downloads a remote thumbnail into the item's managed sidecar folder and
+ * attaches it via {@see RelatedAssets}.
  *
  * Priority: existing related poster wins (user upload). Otherwise derive a
  * remote URL (Mux first frame at `?time=0`, other providers via ThumbnailDeriver)
@@ -69,7 +69,7 @@ class PosterFetcher extends Component
 
     /**
      * Returns the existing poster if present, otherwise downloads `$remoteUrl`
-     * (or a derived URL) into the item folder and attaches it.
+     * (or a derived URL) into the managed sidecar folder and attaches it.
      *
      * @param MediaItemRecord $record the media item
      * @param ?string $remoteUrl optional remote image URL; derived when null
@@ -97,13 +97,14 @@ class PosterFetcher extends Component
             return null;
         }
 
-        $pmediaAsset = Craft::$app->getAssets()->getAssetById((int)$record->assetId);
+        $folder = Plugin::getInstance()->getSidecarStorage()->getItemFolder($record);
 
-        if (!$pmediaAsset) {
+        if (!$folder) {
+            $this->_persistThumbnailUrl($record, $remoteUrl);
+
             return null;
         }
 
-        $folder = $pmediaAsset->getFolder();
         $download = $this->downloadToTemp($remoteUrl);
 
         if ($download === null) {
@@ -115,7 +116,7 @@ class PosterFetcher extends Component
                 $download['path'],
                 $download['extension'],
                 $folder,
-                (int)$pmediaAsset->volumeId,
+                (int)$folder->volumeId,
                 (string)$record->title,
             );
         } finally {

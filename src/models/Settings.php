@@ -32,11 +32,17 @@ class Settings extends Model
     public ?string $defaultVolumeUid = null;
 
     /**
-     * @var ?string UID of the volume for inline-uploaded posters, captions, and transcripts.
-     * Falls back to `$defaultVolumeUid` when null.
-     * @deprecated 1.2.2 Unused; kept for project config BC. Removal planned for 2.0.
+     * @var ?string Legacy attachments volume setting.
+     * @deprecated 1.2.2 Unused; kept for project config BC.
      */
     public ?string $attachmentsVolumeUid = null;
+
+    /**
+     * @var ?string UID of the plugin-owned volume for fetched/uploaded posters
+     *              and text tracks.
+     * @since 2.2.0
+     */
+    public ?string $sidecarVolumeUid = null;
 
     /**
      * @var string Media Chrome major version for the `scripts()` helper.
@@ -143,7 +149,16 @@ class Settings extends Model
         $rules[] = [['mediaChromeVersion', 'scriptLoaderMode', 'cdnHost'], 'required'];
         $rules[] = [['mediaChromeVersion', 'cdnHost', 'muxTokenId', 'muxTokenSecret', 'muxWebhookSecret'], 'string'];
         $rules[] = [['selfHostBaseUrl'], 'string'];
-        $rules[] = [['defaultVolumeUid', 'attachmentsVolumeUid'], 'string', 'max' => 36];
+        $rules[] = [['defaultVolumeUid', 'attachmentsVolumeUid', 'sidecarVolumeUid'], 'string', 'max' => 36];
+        $rules[] = [
+            ['sidecarVolumeUid'],
+            'compare',
+            'compareAttribute' => 'defaultVolumeUid',
+            'operator' => '!=',
+            'when' => static fn(self $model) => (bool)$model->sidecarVolumeUid
+                && (bool)$model->defaultVolumeUid,
+            'message' => 'The sidecar volume must be different from the default manifest volume.',
+        ];
         $rules[] = [['scriptLoaderMode'], 'in', 'range' => ['cdn', 'self-host', 'none']];
         $rules[] = [['defaultProviders', 'defaultFieldAllowedProviders'], 'each', 'rule' => ['string']];
         $rules[] = [

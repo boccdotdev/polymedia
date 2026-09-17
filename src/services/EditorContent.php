@@ -108,19 +108,19 @@ class EditorContent extends Component
 
         $posterAsset = $plugin->getRelatedAssets()->getPoster($record->id);
         $elements = $posterAsset ? [$posterAsset] : [];
+        $uploadFolder = $plugin->getSidecarStorage()->getItemFolder($record);
 
         $html .= Cp::elementSelectFieldHtml(
-            $this->getPosterFieldConfig($asset->getFolder(), $elements, $static),
+            $this->getPosterFieldConfig($uploadFolder, $elements, $static),
         );
 
         if ($this->supportsTracks($record)) {
-            $folder = $asset->getFolder();
             $siteId = Craft::$app->getSites()->getCurrentSite()->id;
 
             foreach (array_keys(self::TRACK_ROLES) as $role) {
                 $trackAssets = $plugin->getRelatedAssets()->resolveTracks($record->id, $role, $siteId);
                 $html .= Cp::elementSelectFieldHtml(
-                    $this->getTrackFieldConfig($role, $folder, $trackAssets, $static),
+                    $this->getTrackFieldConfig($role, $uploadFolder, $trackAssets, $static),
                 );
             }
         }
@@ -380,10 +380,15 @@ class EditorContent extends Component
                     'canUpload' => true,
                     'fsType' => $fsType,
                     'folderId' => (int)$folder->id,
-                    'modalSettings' => [
-                        'defaultSource' => $this->_folderSourceKey($folder),
-                    ],
                 ];
+
+                $sidecarVolumeUid = Plugin::getInstance()->getSettings()->sidecarVolumeUid;
+
+                if ($folder->getVolume()->uid !== $sidecarVolumeUid) {
+                    $jsSettings['modalSettings'] = [
+                        'defaultSource' => $this->_folderSourceKey($folder),
+                    ];
+                }
             }
         }
 

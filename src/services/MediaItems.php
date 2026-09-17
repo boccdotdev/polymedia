@@ -284,7 +284,10 @@ class MediaItems extends Component
      */
     public function getByTypeAndProviderIds(string $type, array $providerIds): array
     {
-        $providerIds = array_values(array_unique(array_filter($providerIds, static fn($id) => $id !== null && $id !== '')));
+        $providerIds = array_values(array_unique(array_filter(
+            $providerIds,
+            static fn(mixed $id): bool => $id !== null && $id !== '',
+        )));
 
         if ($type === '' || $providerIds === []) {
             return [];

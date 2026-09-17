@@ -32,6 +32,7 @@ use boccdotdev\polymedia\services\PosterFetcher;
 use boccdotdev\polymedia\services\ProviderFilter;
 use boccdotdev\polymedia\services\RelatedAssets;
 use boccdotdev\polymedia\services\Renderer;
+use boccdotdev\polymedia\services\SidecarStorage;
 use boccdotdev\polymedia\services\ThumbnailDeriver;
 use boccdotdev\polymedia\services\UrlDetector;
 use boccdotdev\polymedia\variables\PolymediaVariable;
@@ -49,9 +50,11 @@ use craft\events\DefineElementEditorHtmlEvent;
 use craft\events\DefineGqlTypeFieldsEvent;
 use craft\events\FieldEvent;
 use craft\events\ModelEvent;
+use craft\events\PluginEvent;
 use craft\events\RegisterAssetFileKindsEvent;
 use craft\events\RegisterComponentTypesEvent;
 use craft\events\RegisterElementSortOptionsEvent;
+use craft\events\RegisterElementSourcesEvent;
 use craft\events\RegisterElementTableAttributesEvent;
 use craft\events\RegisterGqlSchemaComponentsEvent;
 use craft\events\TemplateEvent;
@@ -67,6 +70,7 @@ use craft\models\VolumeFolder;
 use craft\services\Assets as AssetsService;
 use craft\services\Fields;
 use craft\services\Gql as GqlService;
+use craft\services\Plugins as PluginsService;
 use craft\web\twig\variables\CraftVariable;
 use craft\web\View;
 use yii\base\Event;
@@ -86,6 +90,7 @@ use yii\base\Event;
  * @property-read EditorContent $editorContent
  * @property-read Mux $mux
  * @property-read PosterFetcher $posterFetcher
+ * @property-read SidecarStorage $sidecarStorage
  *
  * @author boccdotdev
  * @since 1.0.0
@@ -162,10 +167,13 @@ class Plugin extends BasePlugin
             'editorContent' => EditorContent::class,
             'mux' => Mux::class,
             'posterFetcher' => PosterFetcher::class,
+            'sidecarStorage' => SidecarStorage::class,
         ]);
 
+        $this->_registerInstallHandler();
         $this->_registerFileKind();
         $this->_registerAssetDeleteHandler();
+        $this->_registerSidecarSourceFilter();
         $this->_registerAssetIndexAttributes();
         $this->_registerAssetThumbUrl();
         $this->_registerAssetReconciler();
@@ -351,6 +359,19 @@ class Plugin extends BasePlugin
         return $this->get('posterFetcher');
     }
 
+    /**
+     * Returns the managed sidecar storage service.
+     *
+     * @return SidecarStorage
+     *
+     * @author boccdotdev
+     * @since 2.2.0
+     */
+    public function getSidecarStorage(): SidecarStorage
+    {
+        return $this->get('sidecarStorage');
+    }
+
     // Protected Methods
     // =========================================================================
 
@@ -404,6 +425,36 @@ class Plugin extends BasePlugin
     // =========================================================================
 
     /**
+     * Creates a public local sidecar volume on new installations.
+     *
+     * The handler runs after Craft writes the plugin's project-config entry, so
+     * saving the selected volume UID does not get overwritten by installation.
+     * Failure does not block installation; an administrator can select or create
+     * a different volume later.
+     */
+    private function _registerInstallHandler(): void
+    {
+        Event::on(
+            PluginsService::class,
+            PluginsService::EVENT_AFTER_INSTALL_PLUGIN,
+            function(PluginEvent $e) {
+                if ($e->plugin !== $this || $this->getSettings()->sidecarVolumeUid) {
+                    return;
+                }
+
+                try {
+                    $this->getSidecarStorage()->createDefaultLocalVolume();
+                } catch (\Throwable $exception) {
+                    Craft::warning(
+                        "Polymedia could not create its default sidecar volume: {$exception->getMessage()}",
+                        __METHOD__,
+                    );
+                }
+            },
+        );
+    }
+
+    /**
      * Registers the `polymedia` custom file kind for `.pmedia` files.
      */
     private function _registerFileKind(): void
@@ -424,8 +475,9 @@ class Plugin extends BasePlugin
      * Cleans up media item records when assets are deleted.
      *
      * Soft delete leaves records intact for trash restore. Hard delete removes
-     * the item record and dedicated folder, and optionally deletes the remote
-     * Mux asset when {@see Settings::$deleteMuxAssetOnDelete} is enabled.
+     * the item record and its explicitly owned sidecar folder, and optionally
+     * deletes the remote Mux asset when
+     * {@see Settings::$deleteMuxAssetOnDelete} is enabled.
      */
     private function _registerAssetDeleteHandler(): void
     {
@@ -448,8 +500,8 @@ class Plugin extends BasePlugin
 
                 $record = $this->getMediaItems()->getByAssetId((int)$asset->id);
                 $this->_maybeDeleteMuxAsset($record);
+                $this->getSidecarStorage()->deleteForAsset($asset);
                 $this->getMediaItems()->deleteByAssetId((int)$asset->id);
-                $this->_deleteItemFolderIfDedicated($asset);
             },
         );
     }
@@ -524,28 +576,35 @@ class Plugin extends BasePlugin
     }
 
     /**
-     * Deletes a `.pmedia`'s dedicated folder, and the poster/track files
-     * co-located in it, when the item is hard-deleted.
+     * Hides the plugin-owned sidecar volume from asset indexes and pickers.
      *
-     * Only fires when the asset sits alone in its own folder (see
-     * {@see ManifestWriter::isDedicatedItemFolder()}), so a shared folder the
-     * item merely happens to sit in is never removed.
-     *
-     * @param Asset $asset the deleted `.pmedia` asset
+     * The volume remains available in asset settings and direct uploads still
+     * target its folder IDs. Editors therefore do not browse plugin-managed
+     * posters and tracks as ordinary library assets.
      */
-    private function _deleteItemFolderIfDedicated(Asset $asset): void
+    private function _registerSidecarSourceFilter(): void
     {
-        $folder = Craft::$app->getAssets()->getFolderById((int)$asset->folderId);
+        Event::on(
+            Asset::class,
+            Element::EVENT_REGISTER_SOURCES,
+            function(RegisterElementSourcesEvent $e) {
+                if ($e->context === 'settings') {
+                    return;
+                }
 
-        if (!$folder) {
-            return;
-        }
+                $uid = $this->getSettings()->sidecarVolumeUid;
 
-        if (!$this->getManifestWriter()->isDedicatedItemFolder($folder, $asset->id)) {
-            return;
-        }
+                if (!$uid) {
+                    return;
+                }
 
-        Craft::$app->getAssets()->deleteFoldersByIds($folder->id, true);
+                $sourceKey = "volume:{$uid}";
+                $e->sources = array_values(array_filter(
+                    $e->sources,
+                    static fn(array $source) => ($source['key'] ?? null) !== $sourceKey,
+                ));
+            },
+        );
     }
 
     /**
@@ -752,7 +811,10 @@ class Plugin extends BasePlugin
             return;
         }
 
-        $asset->newFilename = $expectedFilename;
+        $asset->newFilename = Craft::$app->getAssets()->getNameReplacementInFolder(
+            $expectedFilename,
+            (int)$asset->folderId,
+        );
     }
 
     /**
@@ -1114,10 +1176,8 @@ class Plugin extends BasePlugin
     }
 
     /**
-     * Serves related poster (or remote thumbnail) as the CP thumb for `.pmedia` assets.
-     *
-     * Folder listing still uses Craft’s folder icon; posters are co-located in the
-     * dedicated item folder so volume browsers show a real image among contents.
+     * Serves a related poster or remote thumbnail as the CP thumb for `.pmedia`
+     * assets, even though the sidecar volume is hidden from the asset index.
      */
     private function _registerAssetThumbUrl(): void
     {
