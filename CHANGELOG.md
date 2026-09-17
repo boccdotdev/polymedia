@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Field pickers get the asset, not just the library.** When “Add media” is used inside a field’s asset picker, importing a Mux video (or completing an upload, or creating from URL) now selects the resulting asset straight into the field — the picker refreshes, auto-selects the new asset, and confirms the selection. Already-imported videos show an enabled **Select** button in that context instead of the disabled “In Craft” state. On the standalone Assets index the behavior is unchanged.
+- **Search in Browse Mux library.** The browse modal has a native CP search field that filters your Mux library by title, passthrough, asset id, or playback id (case-insensitive, debounced, paginated). The Mux Assets API has no search endpoint, so the plugin scans the newest 1,000 assets (100/page) into a short-lived cache (2 min) and filters server-side; the modal notes when a library exceeds that window. Completing an upload invalidates the cache so new videos are searchable immediately.
+
 ## 2.1.3 - 2026-07-17
 
 ### Fixed

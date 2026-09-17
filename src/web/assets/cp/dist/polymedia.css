@@ -54,6 +54,12 @@
     flex: 0 0 auto;
 }
 
+/* Search input above the grid; icon/clear-btn come from Craft's .texticon */
+.polymedia-mux-search {
+    display: block;
+    margin-bottom: var(--m);
+}
+
 .polymedia-mux-status {
     color: var(--gray-550, #596673);
     margin-bottom: 12px;
@@ -78,6 +84,11 @@
 
 .polymedia-mux-card.is-signed {
     opacity: 0.72;
+}
+
+/* In a field picker an imported signed asset is selectable — don't fade it. */
+.polymedia-mux-modal.is-field-picker .polymedia-mux-card.is-signed.is-imported {
+    opacity: 1;
 }
 
 .polymedia-mux-thumb {

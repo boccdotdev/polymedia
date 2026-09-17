@@ -42,6 +42,29 @@ use yii\base\Exception;
  */
 class Mux extends Component
 {
+    // Const Properties
+    // =========================================================================
+
+    /**
+     * Maximum number of assets scanned when searching the library.
+     *
+     * The Mux Assets API is list-only (no server-side search or title filter),
+     * so search pages through the list — newest first — and filters locally.
+     * The cap bounds API calls and memory for very large libraries.
+     */
+    public const SEARCH_SCAN_LIMIT = 1000;
+
+    /**
+     * @var string Cache key for the library snapshot used by search.
+     */
+    private const SNAPSHOT_CACHE_KEY = 'polymedia:mux:library-snapshot';
+
+    /**
+     * @var int Snapshot TTL in seconds. Short: search stays fast across
+     *          keystrokes without going stale for long after uploads.
+     */
+    private const SNAPSHOT_CACHE_TTL = 120;
+
     // Private Properties
     // =========================================================================
 
@@ -153,6 +176,97 @@ class Mux extends Component
             'page' => $page,
             'limit' => $limit,
         ];
+    }
+
+    /**
+     * Searches the Mux library by title, passthrough, asset id, or playback id.
+     *
+     * The Mux Assets API has no search endpoint, so this filters a cached
+     * snapshot of the newest {@see self::SEARCH_SCAN_LIMIT} assets. Matching is
+     * case-insensitive substring. Results are paginated locally and include
+     * `total` (matches found) and `scanLimited` (whether the library exceeded
+     * the scan window, i.e. older assets were not searched).
+     *
+     * @param string $query the search text
+     * @param int $limit page size
+     * @param int $page 1-based page
+     * @return array{items: array<int, array<string, mixed>>, page: int, limit: int, total: int, scanLimited: bool, scanLimit: int}
+     * @throws Exception when Mux is not configured or the API call fails
+     *
+     * @author boccdotdev
+     * @since 2.2.0
+     */
+    public function searchAssets(string $query, int $limit = 25, int $page = 1): array
+    {
+        $query = trim($query);
+
+        if ($query === '') {
+            return $this->listAssets($limit, $page)
+                + ['total' => 0, 'scanLimited' => false, 'scanLimit' => self::SEARCH_SCAN_LIMIT];
+        }
+
+        $this->_requireConfigured();
+
+        $limit = max(1, min(100, $limit));
+        $page = max(1, $page);
+
+        $snapshot = $this->_getLibrarySnapshot();
+        $matches = $this->filterAssets($snapshot['items'], $query);
+        $total = count($matches);
+
+        return [
+            'items' => array_slice($matches, ($page - 1) * $limit, $limit),
+            'page' => $page,
+            'limit' => $limit,
+            'total' => $total,
+            'scanLimited' => $snapshot['scanLimited'],
+            'scanLimit' => self::SEARCH_SCAN_LIMIT,
+        ];
+    }
+
+    /**
+     * Filters mapped asset DTOs by a case-insensitive substring query.
+     *
+     * Matches against `title`, `passthrough`, `assetId`, and `playbackId`.
+     * Pure function — exposed for unit testing.
+     *
+     * @param array<int, array<string, mixed>> $items mapped assets ({@see mapAsset()})
+     * @param string $query non-empty search text
+     * @return array<int, array<string, mixed>>
+     *
+     * @author boccdotdev
+     * @since 2.2.0
+     */
+    public function filterAssets(array $items, string $query): array
+    {
+        $needle = mb_strtolower(trim($query));
+
+        if ($needle === '') {
+            return array_values($items);
+        }
+
+        return array_values(array_filter($items, static function(array $item) use ($needle): bool {
+            foreach (['title', 'passthrough', 'assetId', 'playbackId'] as $key) {
+                $value = $item[$key] ?? null;
+
+                if (is_string($value) && $value !== '' && str_contains(mb_strtolower($value), $needle)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }));
+    }
+
+    /**
+     * Drops the cached library snapshot so new uploads are searchable at once.
+     *
+     * @author boccdotdev
+     * @since 2.2.0
+     */
+    public function invalidateLibrarySnapshot(): void
+    {
+        Craft::$app->getCache()->delete(self::SNAPSHOT_CACHE_KEY);
     }
 
     /**
@@ -360,6 +474,51 @@ class Mux extends Component
 
     // Private Methods
     // =========================================================================
+
+    /**
+     * Returns the newest {@see self::SEARCH_SCAN_LIMIT} assets, cached briefly.
+     *
+     * Pages through the Mux list API at 100/page. Cached for
+     * {@see self::SNAPSHOT_CACHE_TTL} seconds so per-keystroke searches cost
+     * zero API calls after the first; {@see invalidateLibrarySnapshot()} drops
+     * it when an upload completes.
+     *
+     * @return array{items: array<int, array<string, mixed>>, scanLimited: bool}
+     * @throws Exception
+     */
+    private function _getLibrarySnapshot(): array
+    {
+        $cache = Craft::$app->getCache();
+        $cached = $cache->get(self::SNAPSHOT_CACHE_KEY);
+
+        if (is_array($cached) && isset($cached['items'], $cached['scanLimited'])) {
+            return $cached;
+        }
+
+        $items = [];
+        $page = 1;
+        $pageSize = 100;
+        $scanLimited = false;
+
+        do {
+            $result = $this->listAssets($pageSize, $page);
+            $count = count($result['items']);
+            $items = array_merge($items, $result['items']);
+            $page++;
+
+            if (count($items) >= self::SEARCH_SCAN_LIMIT) {
+                // A full final page suggests more assets beyond the window.
+                $scanLimited = $count === $pageSize;
+                $items = array_slice($items, 0, self::SEARCH_SCAN_LIMIT);
+                break;
+            }
+        } while ($count === $pageSize);
+
+        $snapshot = ['items' => $items, 'scanLimited' => $scanLimited];
+        $cache->set(self::SNAPSHOT_CACHE_KEY, $snapshot, self::SNAPSHOT_CACHE_TTL);
+
+        return $snapshot;
+    }
 
     /**
      * @throws Exception

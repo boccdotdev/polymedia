@@ -55,9 +55,13 @@ class MuxController extends Controller
         $request = Craft::$app->getRequest();
         $limit = (int)$request->getQueryParam('limit', 25);
         $page = (int)$request->getQueryParam('page', 1);
+        $search = trim((string)$request->getQueryParam('search', ''));
 
         try {
-            $result = Plugin::getInstance()->getMux()->listAssets($limit, $page);
+            $mux = Plugin::getInstance()->getMux();
+            $result = $search !== ''
+                ? $mux->searchAssets($search, $limit, $page)
+                : $mux->listAssets($limit, $page);
         } catch (\Throwable $e) {
             return $this->asFailure($e->getMessage());
         }
@@ -314,6 +318,9 @@ class MuxController extends Controller
                 'Mux asset id or upload id is required.',
             ));
         }
+
+        // New Mux asset exists now — make it searchable without waiting out the TTL.
+        Plugin::getInstance()->getMux()->invalidateLibrarySnapshot();
 
         return $this->_respondFromMuxAssetId(
             $muxAssetId,

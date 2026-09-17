@@ -12,6 +12,7 @@ use boccdotdev\polymedia\models\Settings;
 use boccdotdev\polymedia\Plugin;
 use boccdotdev\polymedia\services\EditorContent;
 use boccdotdev\polymedia\services\MediaItems;
+use boccdotdev\polymedia\services\Mux;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -52,6 +53,24 @@ class SettingsGatingTest extends TestCase
         $this->assertSame('errored', $editor->muxStatusToken('errored'));
         $this->assertSame('unknown', $editor->muxStatusToken(''));
         $this->assertSame('unknown', $editor->muxStatusToken('something-else'));
+    }
+
+    public function testFilterAssetsMatchesTitleIdsAndPassthroughCaseInsensitively(): void
+    {
+        $mux = new Mux();
+        $items = [
+            ['title' => 'Launch Day Recap', 'passthrough' => null, 'assetId' => 'a1', 'playbackId' => 'pb1'],
+            ['title' => '', 'passthrough' => 'client-promo', 'assetId' => 'a2', 'playbackId' => 'pb2'],
+            ['title' => 'Untitled', 'passthrough' => null, 'assetId' => 'AbCdEf123', 'playbackId' => 'xYz789'],
+        ];
+
+        $this->assertCount(1, $mux->filterAssets($items, 'launch'));
+        $this->assertSame('a1', $mux->filterAssets($items, 'LAUNCH DAY')[0]['assetId']);
+        $this->assertSame('a2', $mux->filterAssets($items, 'promo')[0]['assetId']);
+        $this->assertSame('AbCdEf123', $mux->filterAssets($items, 'abcdef')[0]['assetId']);
+        $this->assertSame('xYz789', $mux->filterAssets($items, 'XYZ')[0]['playbackId']);
+        $this->assertSame([], $mux->filterAssets($items, 'no-such-video'));
+        $this->assertCount(3, $mux->filterAssets($items, '  '));
     }
 
     public function testDecodeMetadataJson(): void

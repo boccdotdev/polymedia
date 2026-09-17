@@ -186,9 +186,17 @@
         { params: params }
       );
 
-      slideout.on('submit', function () {
+      slideout.on('submit', function (ev) {
         Craft.cp.displayNotice(Craft.t('polymedia', 'Media item created.'));
-        Craft.Polymedia._refreshIndex(assetIndex);
+
+        var assetId =
+          ev && ev.response && ev.response.data
+            ? ev.response.data.assetId
+            : null;
+
+        if (!Craft.Polymedia.selectIntoField(assetIndex, assetId)) {
+          Craft.Polymedia._refreshIndex(assetIndex);
+        }
       });
     },
 
@@ -228,6 +236,56 @@
       return folderId || null;
     },
 
+    /**
+     * Whether the index lives inside an element selector modal (a field's
+     * asset picker) rather than the standalone Assets index.
+     *
+     * @param {?Craft.AssetIndex} assetIndex
+     * @returns {boolean}
+     */
+    isFieldPicker: function (assetIndex) {
+      return !!(
+        assetIndex &&
+        assetIndex.settings &&
+        assetIndex.settings.modal &&
+        typeof assetIndex.settings.modal.selectElements === 'function'
+      );
+    },
+
+    /**
+     * Selects an asset into the field whose picker spawned this index.
+     *
+     * Passes a minimal element reference through Craft's normal selector
+     * callback. The field input renders the selected asset by id, so this also
+     * works when the asset lives in a per-item subfolder that isn't visible in
+     * the selector's current source.
+     *
+     * @param {?Craft.AssetIndex} assetIndex
+     * @param {?number} assetId the Craft asset id to select
+     * @returns {boolean} whether field selection was attempted
+     */
+    selectIntoField: function (assetIndex, assetId) {
+      if (!assetId || !Craft.Polymedia.isFieldPicker(assetIndex)) {
+        return false;
+      }
+
+      var selectorModal = assetIndex.settings.modal;
+      var id = parseInt(assetId, 10);
+
+      if (!id) {
+        return false;
+      }
+
+      selectorModal.onSelect([
+        {
+          id: id,
+          siteId: assetIndex.siteId || Craft.siteId,
+        },
+      ]);
+
+      return true;
+    },
+
     _refreshIndex: function (assetIndex) {
       if (assetIndex) {
         assetIndex.updateElements();
@@ -245,8 +303,12 @@
     folderId: null,
     page: 1,
     limit: 24,
-    loading: false,
+    searchQuery: '',
+    searchTimer: null,
+    requestId: 0, // stale-response guard; only the newest request renders
     $body: null,
+    $searchInput: null,
+    $searchClear: null,
     $grid: null,
     $status: null,
     $pager: null,
@@ -262,6 +324,12 @@
           '"/>'
       );
 
+      // Field pickers get Select actions on already-imported cards.
+      $container.toggleClass(
+        'is-field-picker',
+        Craft.Polymedia.isFieldPicker(this.assetIndex)
+      );
+
       var $header = $(
         '<div class="header">' +
           '<h1>' +
@@ -271,6 +339,26 @@
       );
 
       this.$body = $('<div class="body"/>');
+
+      // Native CP search input (texticon + clear button), filtering the
+      // library server-side since the Mux list API has no search of its own.
+      var $search = $(
+        '<div class="texticon search icon clearable polymedia-mux-search">' +
+          '<input type="text" class="text fullwidth" autocomplete="off" placeholder="' +
+          Craft.escapeHtml(Craft.t('app', 'Search')) +
+          '" aria-label="' +
+          Craft.escapeHtml(Craft.t('polymedia', 'Search videos')) +
+          '"/>' +
+          '<button type="button" class="clear-btn hidden" title="' +
+          Craft.escapeHtml(Craft.t('app', 'Clear search')) +
+          '" aria-label="' +
+          Craft.escapeHtml(Craft.t('app', 'Clear search')) +
+          '"></button>' +
+          '</div>'
+      ).appendTo(this.$body);
+      this.$searchInput = $search.find('input');
+      this.$searchClear = $search.find('.clear-btn');
+
       this.$status = $('<div class="polymedia-mux-status"/>').appendTo(this.$body);
       this.$grid = $('<div class="polymedia-mux-grid"/>').appendTo(this.$body);
       this.$pager = $('<div class="polymedia-mux-pager"/>').appendTo(this.$body);
@@ -303,7 +391,57 @@
       this.show();
 
       this.addListener($footer.find('[data-action="close"]'), 'click', 'hide');
+      this.addListener(this.$searchInput, 'textchange', 'onSearchChange');
+      this.addListener(this.$searchClear, 'click', 'onSearchClear');
       this.loadPage(1);
+    },
+
+    onSearchChange: function () {
+      var self = this;
+      var value = String(this.$searchInput.val() || '');
+
+      this.$searchClear.toggleClass('hidden', value === '');
+
+      if (this.searchTimer) {
+        clearTimeout(this.searchTimer);
+      }
+
+      // Debounce so a keystroke burst becomes one request.
+      this.searchTimer = setTimeout(function () {
+        self.searchTimer = null;
+        var query = String(self.$searchInput.val() || '').trim();
+
+        if (query !== self.searchQuery) {
+          self.searchQuery = query;
+          self.loadPage(1);
+        }
+      }, 350);
+    },
+
+    onSearchClear: function () {
+      this.$searchInput.val('').trigger('focus');
+      this.$searchClear.addClass('hidden');
+
+      if (this.searchTimer) {
+        clearTimeout(this.searchTimer);
+        this.searchTimer = null;
+      }
+
+      if (this.searchQuery !== '') {
+        this.searchQuery = '';
+        this.loadPage(1);
+      }
+    },
+
+    onFadeOut: function () {
+      if (this.searchTimer) {
+        clearTimeout(this.searchTimer);
+        this.searchTimer = null;
+      }
+
+      // Drop any in-flight response.
+      this.requestId++;
+      this.base();
     },
 
     /**
@@ -350,12 +488,10 @@
 
     loadPage: function (page) {
       var self = this;
+      // Requests may overlap while typing — only the newest response renders.
+      var requestId = ++this.requestId;
+      var search = this.searchQuery;
 
-      if (this.loading) {
-        return;
-      }
-
-      this.loading = true;
       this.page = page;
       this.$status.text(Craft.t('polymedia', 'Loading Mux library…'));
       this.$grid.empty();
@@ -363,31 +499,61 @@
 
       // GET query args go in `params`; `data` becomes a request body that the
       // server ignores, so page/limit would silently fall back to defaults.
+      var params = { page: page, limit: this.limit };
+
+      if (search) {
+        params.search = search;
+      }
+
       Craft.sendActionRequest('GET', 'polymedia/mux/library', {
-        params: { page: page, limit: this.limit },
+        params: params,
       })
         .then(function (response) {
-          self.loading = false;
+          if (requestId !== self.requestId) {
+            return;
+          }
+
           var data = response.data || {};
           var items = data.items || [];
 
           self.$status.empty();
 
           if (!items.length) {
-            self.$status.text(Craft.t('polymedia', 'No Mux assets found.'));
+            self.$status.text(
+              search
+                ? Craft.t('polymedia', 'No videos match your search.')
+                : Craft.t('polymedia', 'No Mux assets found.')
+            );
             self.updateSizeAndPosition();
             return;
+          }
+
+          if (search && data.scanLimited) {
+            self.$status.text(
+              Craft.t(
+                'polymedia',
+                'Search is limited to the {count} most recent videos.',
+                { count: data.scanLimit || 1000 }
+              )
+            );
           }
 
           items.forEach(function (item) {
             self.$grid.append(self._card(item));
           });
 
-          self._renderPager(data.page || page, items.length);
+          self._renderPager(
+            data.page || page,
+            items.length,
+            search ? data.total : null
+          );
           self.updateSizeAndPosition();
         })
         .catch(function (error) {
-          self.loading = false;
+          if (requestId !== self.requestId) {
+            return;
+          }
+
           var message =
             (error &&
               error.response &&
@@ -400,11 +566,22 @@
         });
     },
 
-    _renderPager: function (page, count) {
+    /**
+     * @param {number} page current page
+     * @param {number} count items on this page
+     * @param {?number} total exact match count (search), or null when the
+     *                        plain listing's has-more is inferred from count
+     */
+    _renderPager: function (page, count, total) {
       var self = this;
       this.$pager.empty();
 
-      if (page <= 1 && count < this.limit) {
+      var hasNext =
+        typeof total === 'number'
+          ? page * this.limit < total
+          : count >= this.limit;
+
+      if (page <= 1 && !hasNext) {
         return;
       }
 
@@ -417,7 +594,7 @@
       );
       var $next = $(
         '<button type="button" class="btn small"' +
-          (count < this.limit ? ' disabled' : '') +
+          (!hasNext ? ' disabled' : '') +
           '>' +
           Craft.escapeHtml(Craft.t('polymedia', 'Next')) +
           '</button>'
@@ -429,7 +606,7 @@
         });
       }
 
-      if (count >= this.limit) {
+      if (hasNext) {
         $next.on('click', function () {
           self.loadPage(page + 1);
         });
@@ -481,9 +658,24 @@
           '</span>';
       }
 
-      var actionLabel = item.alreadyImported
-        ? Craft.t('polymedia', 'In Craft')
-        : Craft.t('polymedia', 'Import');
+      // In a field picker, an already-imported asset is directly selectable;
+      // on the plain Assets index there is nothing further to do with it.
+      var inFieldPicker = Craft.Polymedia.isFieldPicker(this.assetIndex);
+      var canSelectExisting =
+        inFieldPicker && item.alreadyImported && item.craftAssetId;
+
+      var actionLabel;
+      var actionDisabled = false;
+
+      if (canSelectExisting) {
+        actionLabel = Craft.t('app', 'Select');
+      } else if (item.alreadyImported) {
+        actionLabel = Craft.t('polymedia', 'In Craft');
+        actionDisabled = true;
+      } else {
+        actionLabel = Craft.t('polymedia', 'Import');
+        actionDisabled = item.isPublic === false;
+      }
 
       var $card = $(
         '<div class="polymedia-mux-card' +
@@ -505,7 +697,7 @@
           '</div>' +
           '<div class="polymedia-mux-actions">' +
           '<button type="button" class="btn small submit" data-action="import"' +
-          (item.isPublic === false && !item.alreadyImported ? ' disabled' : '') +
+          (actionDisabled ? ' disabled' : '') +
           '>' +
           Craft.escapeHtml(actionLabel) +
           '</button>' +
@@ -513,9 +705,18 @@
           '</div>'
       );
 
-      $card.find('[data-action="import"]').on('click', function () {
-        self._import(item, $(this));
-      });
+      var $importBtn = $card.find('[data-action="import"]');
+
+      if (canSelectExisting) {
+        $importBtn.on('click', function () {
+          Craft.Polymedia.selectIntoField(self.assetIndex, item.craftAssetId);
+          self.hide();
+        });
+      } else if (!actionDisabled) {
+        $importBtn.on('click', function () {
+          self._import(item, $importBtn);
+        });
+      }
 
       return $card;
     },
@@ -541,7 +742,12 @@
           var message =
             data.message || Craft.t('polymedia', 'Mux media imported.');
           Craft.cp.displayNotice(message);
-          Craft.Polymedia._refreshIndex(self.assetIndex);
+
+          // In a field picker, hand the new asset straight to the field.
+          if (!Craft.Polymedia.selectIntoField(self.assetIndex, data.assetId)) {
+            Craft.Polymedia._refreshIndex(self.assetIndex);
+          }
+
           self.hide();
         })
         .catch(function (error) {
@@ -926,7 +1132,12 @@
           var message =
             data.message || Craft.t('polymedia', 'Mux upload complete.');
           Craft.cp.displayNotice(message);
-          Craft.Polymedia._refreshIndex(self.assetIndex);
+
+          // In a field picker, hand the new asset straight to the field.
+          if (!Craft.Polymedia.selectIntoField(self.assetIndex, data.assetId)) {
+            Craft.Polymedia._refreshIndex(self.assetIndex);
+          }
+
           self.busy = false;
           self.hide();
         })
