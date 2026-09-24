@@ -12,13 +12,11 @@
 namespace boccdotdev\polymedia\console\controllers;
 
 use boccdotdev\polymedia\Plugin;
-use boccdotdev\polymedia\records\MediaItemRecord;
+use boccdotdev\polymedia\services\SidecarMigration;
 use Craft;
 use craft\console\Controller;
 use craft\elements\Asset;
 use craft\helpers\Console;
-use craft\helpers\StringHelper;
-use craft\models\VolumeFolder;
 use yii\console\ExitCode;
 
 /**
@@ -71,12 +69,10 @@ class MigrateController extends Controller
     }
 
     /**
-     * Flattens legacy `.pmedia` folders and moves their attached files into the
-     * configured sidecar volume.
+     * Flattens legacy `.pmedia` folders and relocates explicitly managed sidecars.
      *
-     * Only folders matching Polymedia's old `<title-slug>-<8 chars>` naming
-     * convention are migrated. The command never deletes a legacy folder, even
-     * after it becomes empty, so unrelated files cannot be removed.
+     * Legacy and shared attachments stay in place. Folder names are not proof of
+     * ownership. The command never deletes a legacy folder, even when empty.
      *
      * @return int
      *
@@ -109,185 +105,67 @@ class MigrateController extends Controller
             return ExitCode::OK;
         }
 
-        $movedManifests = 0;
-        $movedSidecars = 0;
+        $migration = new SidecarMigration(
+            Craft::$app->getAssets(),
+            $sidecars,
+            $plugin->getRelatedAssets(),
+        );
+        $counts = ['manifest' => 0, 'sidecar' => 0];
+        $failures = 0;
+        $kept = 0;
 
         foreach ($assets as $asset) {
             $record = $plugin->getMediaItems()->getByAssetId((int)$asset->id);
 
             if (!$record) {
-                $this->stderr("  ! Skipped #{$asset->id}: media item record not found." . PHP_EOL, Console::FG_YELLOW);
+                $failures++;
+                $this->stderr("  ! Failed #{$asset->id}: media item record not found." . PHP_EOL, Console::FG_RED);
                 continue;
             }
 
-            $movedSidecars += $this->_migrateRelatedAssets($asset, $record);
-            $movedManifests += $this->_flattenManifest($asset, $record);
+            try {
+                $results = $migration->migrateItem($asset, $record, $this->dryRun);
+            } catch (\Throwable $e) {
+                $failures++;
+                $this->stderr("  ! Failed #{$asset->id}: {$e->getMessage()}" . PHP_EOL, Console::FG_RED);
+                continue;
+            }
+
+            foreach ($results as $result) {
+                $line = "  {$result['status']} {$result['kind']} #{$result['assetId']}: {$result['message']}" . PHP_EOL;
+
+                if ($result['status'] === 'failed') {
+                    $failures++;
+                    $this->stderr($line, Console::FG_RED);
+                } elseif ($result['status'] === 'kept') {
+                    $kept++;
+                    $this->stdout($line, Console::FG_YELLOW);
+                } else {
+                    $counts[$result['kind']]++;
+                    $this->stdout($line);
+                }
+            }
         }
 
         $verb = $this->dryRun ? 'Would migrate' : 'Migrated';
         $this->stdout(
             sprintf(
-                '%s%s %d manifest(s) and %d sidecar file(s).%s',
+                '%s%s %d manifest(s) and %d sidecar file(s); %d kept, %d failed.%s',
                 PHP_EOL,
                 $verb,
-                $movedManifests,
-                $movedSidecars,
+                $counts['manifest'],
+                $counts['sidecar'],
+                $kept,
+                $failures,
                 PHP_EOL,
             ),
-            Console::FG_GREEN,
+            $failures ? Console::FG_RED : Console::FG_GREEN,
         );
         $this->stdout(
             'Legacy folders were not deleted. Review and remove empty folders from the Assets index.' . PHP_EOL,
             Console::FG_YELLOW,
         );
 
-        return ExitCode::OK;
-    }
-
-    // Private Methods
-    // =========================================================================
-
-    /**
-     * Moves related files out of folders created by Polymedia 1.2–2.1.
-     *
-     * @param Asset $asset the `.pmedia` asset
-     * @param MediaItemRecord $record its media item record
-     * @return int number of files moved or planned
-     */
-    private function _migrateRelatedAssets(Asset $asset, MediaItemRecord $record): int
-    {
-        $plugin = Plugin::getInstance();
-        $assetsService = Craft::$app->getAssets();
-        $sidecarVolume = $plugin->getSidecarStorage()->getVolume();
-        $count = 0;
-        $seen = [];
-
-        foreach ($plugin->getRelatedAssets()->getForItem($record->id) as $relation) {
-            if (isset($seen[$relation->assetId])) {
-                continue;
-            }
-
-            $seen[$relation->assetId] = true;
-            $relatedAsset = $assetsService->getAssetById($relation->assetId);
-            $folder = $relatedAsset
-                ? $assetsService->getFolderById((int)$relatedAsset->folderId)
-                : null;
-
-            if (!$relatedAsset || !$folder) {
-                continue;
-            }
-
-            $alreadyManaged = $sidecarVolume
-                && (int)$folder->volumeId === (int)$sidecarVolume->id
-                && $this->_isManagedSidecarFolder($folder, $record);
-
-            if (
-                $alreadyManaged
-                || (
-                    !$this->_isLegacyItemFolder($folder, $asset, $record)
-                    && !$this->_isManagedSidecarFolder($folder, $record)
-                )
-            ) {
-                continue;
-            }
-
-            $this->stdout("  → Sidecar #{$relatedAsset->id} {$relatedAsset->filename}" . PHP_EOL);
-            $count++;
-
-            if (!$this->dryRun) {
-                $plugin->getSidecarStorage()->moveIntoItem($relatedAsset, $record);
-            }
-        }
-
-        return $count;
-    }
-
-    /**
-     * Moves a manifest from a legacy generated folder to its parent.
-     *
-     * @param Asset $asset the `.pmedia` asset
-     * @param MediaItemRecord $record its media item record
-     * @return int one when moved or planned, otherwise zero
-     */
-    private function _flattenManifest(Asset $asset, MediaItemRecord $record): int
-    {
-        $assetsService = Craft::$app->getAssets();
-        $folder = $assetsService->getFolderById((int)$asset->folderId);
-
-        if (!$folder || !$this->_isLegacyItemFolder($folder, $asset, $record)) {
-            return 0;
-        }
-
-        $parent = $assetsService->getFolderById((int)$folder->parentId);
-
-        if (!$parent) {
-            return 0;
-        }
-
-        $this->stdout(
-            "  → Manifest #{$asset->id} {$folder->path}{$asset->filename} ⇒ {$parent->path}" . PHP_EOL,
-        );
-
-        if (!$this->dryRun) {
-            $filename = $assetsService->getNameReplacementInFolder(
-                (string)$asset->filename,
-                (int)$parent->id,
-            );
-            $assetsService->moveAsset($asset, $parent, $filename);
-        }
-
-        return 1;
-    }
-
-    /**
-     * Whether a folder matches the old title-slug plus random suffix convention.
-     *
-     * @param VolumeFolder $folder candidate folder
-     * @param Asset $asset the manifest asset
-     * @param MediaItemRecord $record its media item record
-     * @return bool
-     */
-    private function _isLegacyItemFolder(
-        VolumeFolder $folder,
-        Asset $asset,
-        MediaItemRecord $record,
-    ): bool {
-        if (!$folder->parentId) {
-            return false;
-        }
-
-        $slugs = array_unique(array_filter([
-            StringHelper::slugify((string)$record->title),
-            StringHelper::slugify((string)$asset->title),
-            StringHelper::slugify(pathinfo((string)$asset->filename, PATHINFO_FILENAME)),
-        ]));
-
-        foreach ($slugs as $slug) {
-            if (preg_match('/^' . preg_quote($slug, '/') . '-[a-zA-Z0-9]{8}$/', (string)$folder->name)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * Whether a folder uses the asset-UID layout of a sidecar volume.
-     *
-     * This lets the command move managed files again after an administrator
-     * selects a different sidecar volume.
-     *
-     * @param VolumeFolder $folder candidate folder
-     * @param MediaItemRecord $record its media item record
-     * @return bool
-     */
-    private function _isManagedSidecarFolder(
-        VolumeFolder $folder,
-        MediaItemRecord $record,
-    ): bool {
-        return (bool)$folder->parentId
-            && (string)$folder->path === Plugin::getInstance()
-                ->getSidecarStorage()
-                ->itemFolderPath((string)$record->assetUid);
+        return $failures ? ExitCode::UNSPECIFIED_ERROR : ExitCode::OK;
     }
 }

@@ -182,7 +182,13 @@ php craft polymedia/migrate/sidecars --dry-run
 php craft polymedia/migrate/sidecars
 ```
 
-The command moves attached files only from folders matching Polymedia's old generated naming convention, then moves each `.pmedia` into its parent folder. It never deletes a legacy folder. Review and remove empty folders from the Assets index after the migration.
+The command moves each legacy `.pmedia` into its parent folder, but leaves legacy posters and tracks in place. Older versions did not record whether Polymedia created an attachment or an editor selected it from the library. Matching a title or folder name is not proof of ownership, so these files are reported as `kept` for manual review. Their existing relations continue to work.
+
+When changing sidecar volumes, the command can move files already in that item's explicit asset-UID folder. It leaves files referenced by another Polymedia item or a native Craft relation field in place, including references from trashed items.
+
+The dry run reports `planned` moves without creating folders or changing files. Execution reports `moved`, `kept`, and `failed` results with asset IDs and destinations. Failed moves are not counted as successful, and any failure produces a non-zero exit code. Correct the reported problem and rerun the command; files already moved to the selected sidecar volume are skipped.
+
+The command never deletes a legacy folder. Only remove folders after verifying they are empty; folders containing retained posters or tracks must remain.
 
 ## Front-End Setup
 

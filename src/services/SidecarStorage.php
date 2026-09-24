@@ -11,9 +11,12 @@
 
 namespace boccdotdev\polymedia\services;
 
+use boccdotdev\polymedia\db\Table;
 use boccdotdev\polymedia\Plugin;
 use boccdotdev\polymedia\records\MediaItemRecord;
 use Craft;
+use craft\db\Query;
+use craft\db\Table as CraftTable;
 use craft\elements\Asset;
 use craft\fs\Local;
 use craft\models\Volume;
@@ -245,6 +248,36 @@ class SidecarStorage extends Component
     public function itemFolderPath(string $assetUid): string
     {
         return trim($assetUid, '/\\') . '/';
+    }
+
+    /**
+     * Recognizes the explicit UID layout, including in a previous sidecar volume.
+     * Title-based legacy folders do not establish attachment ownership.
+     */
+    public function isItemFolder(VolumeFolder $folder, string $assetUid): bool
+    {
+        return $assetUid !== ''
+            && (bool)$folder->parentId
+            && (string)$folder->path === $this->itemFolderPath($assetUid);
+    }
+
+    /**
+     * Checks both Polymedia attachments and native Craft relation fields.
+     *
+     * Includes references from trashed elements: restoring an item must not
+     * restore a relation to a file another item's cleanup has since deleted.
+     */
+    public function isSharedAsset(int $assetId, int $itemId): bool
+    {
+        return (new Query())
+            ->from(Table::RELATED_ASSETS)
+            ->where(['assetId' => $assetId])
+            ->andWhere(['not', ['itemId' => $itemId]])
+            ->exists()
+            || (new Query())
+                ->from(CraftTable::RELATIONS)
+                ->where(['targetId' => $assetId])
+                ->exists();
     }
 
     // Private Methods
