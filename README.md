@@ -1,6 +1,6 @@
 # Polymedia for Craft CMS
 
-Store media URLs as Craft assets. Use YouTube, Vimeo, Mux, Spotify, HLS streams, video files and other supported sources in your existing content model.
+Store media URLs as Craft assets. Use YouTube, Vimeo, Mux, Bunny Stream, Spotify, HLS streams, video files and other supported sources in your existing content model.
 
 ## What it's for
 
@@ -27,6 +27,12 @@ php craft plugin/install polymedia
 
 Existing installations need a dedicated sidecar volume before creating new poster or VTT uploads. Existing attachments continue to work in place. Follow the [sidecar volume guide](#sidecar-volume) to configure storage and preview the conservative migration.
 
+## Updating to 2.3
+
+Existing installations keep Mux as their selected video provider and HLS as their playback default. Automatic MP4 upload routing is **off**, even when provider credentials are configured. No videos are migrated, re-encoded or deleted by upgrading.
+
+The 2.2 sidecar-volume and environment-reference requirements still apply. This release does not require a new database schema.
+
 ## Field setup
 
 Create a **Polymedia** field (appears in the field type picker). It extends the native Assets field, so it inherits all Craft's relation features — min/max limits, eager loading, element conditions.
@@ -42,16 +48,16 @@ Polymedia ships with two Craft Plugin Store editions:
 
 | Edition | Includes |
 |---------|----------|
-| Lite, free | URL media for every supported provider, including Mux stream URLs; fields, players, posters and text tracks |
-| Pro | Everything in Lite, plus Mux library browsing and search, direct uploads, optional signed webhooks and console status sync |
+| Lite, free | URL media for every supported provider; references to existing Craft videos; fields, players, posters and text tracks |
+| Pro | Everything in Lite, plus a connected Mux or Bunny library, direct uploads, optional native MP4 upload routing, signed webhooks and console sync |
 
-Pasting a Mux stream URL works in Lite. The Mux library, upload and API integration tools require Pro.
+Pasting public stream or MP4 URLs works in Lite. Connected-library, hosted-upload and provider API tools require Pro.
 
 On non-public domains Craft allows unlicensed Pro for development (normal Craft trial rules).
 
 ## Adding Media
 
-Open the **Add media** menu and choose **From URL**, paste any supported URL, and give it a title. The plugin auto-detects the provider type and creates a `.pmedia` manifest asset. (With Pro + Mux credentials, the same menu also offers **Browse Mux library** and **Upload to Mux**.) The menu is available in two places:
+Open **Add media → From URL**, paste a supported URL, and give it a title. The plugin detects the media type and creates a `.pmedia` manifest asset. **From existing asset** references a Craft-hosted video. With Pro and a configured provider, the menu also offers **Browse video library** and **Upload video**. The menu is available in two places:
 
 - **Assets index** — sits beside **Upload files**. The manifest lands in the volume/folder you're currently browsing, exactly like an uploaded file.
 - **Field selection modals** — when picking media for a Polymedia or Assets field. The manifest lands in the field's upload location.
@@ -62,13 +68,76 @@ For providers that can't be auto-detected (Shaka, Video.js, PeerTube), use the "
 
 You can also set a poster image right on the **From URL** screen. Existing library images stay where they are. Inline uploads land in the plugin's sidecar volume. Posters and tracks can still be managed later on the asset edit screen.
 
+### Choose a video provider
+
+In **Settings → Plugins → Polymedia → Video hosting**, choose Mux or Bunny Stream and configure its connection. Only that provider accepts new library imports and uploads. Authors use one video library without choosing a provider.
+
+Existing assets keep their own provider and playback origin when this setting changes. Retain old credentials if those assets still need synchronization or optional remote deletion. Changing the provider does not move existing videos.
+
+### Reference an existing Craft video
+
+**Add media → From existing asset** is available in Lite. Select a public MP4, WebM or MOV asset. Polymedia creates or reuses a `.pmedia` reference without copying, moving or deleting the original.
+
+The reference uses the source asset's UID. Twig player/data helpers and GraphQL resolve its current URL, so a move or rename does not leave a copied URL behind. A deleted or trashed source asset becomes unavailable. Deleting the wrapper never deletes the source. The physical manifest stores an `asset:<uid>` reference, not a public or signed source URL.
+
+This feature requires a source volume with public URLs. Filesystem existence is verified on import, not on every frontend request. If files are removed directly from a bucket, reconcile Craft's asset index as you would for ordinary assets.
+
+### HLS and MP4 playback
+
+Each provider's connection has a **Default playback format**, initially HLS. HLS adapts quality to the viewer's connection. **MP4 when available** selects the highest ready rendition and otherwise falls back to HLS.
+
+- For Mux, MP4 preference requests a static rendition on new uploads. Existing and legacy renditions are discovered during import/sync. Mux rendition storage and delivery can incur additional charges.
+- For Bunny, enable **MP4 Fallback** in the Stream library before uploading. The plugin verifies which files actually exist. Selecting MP4 in Craft does not change Bunny's encoding settings or regenerate old videos.
+- Neither preference generates MP4s in bulk or makes provider API calls during rendering.
+- The preference is applied at render time, without rewriting the asset's canonical HLS URL. Changing it affects assets that inherit the provider default.
+
+Override it for a particular use:
+
+```twig
+{{ craft.polymedia.player(asset, { playbackFormat: 'mp4' }) }}
+{{ craft.polymedia.element(asset, { playbackFormat: 'hls' }) }}
+```
+
+Media Chrome supplies controls in either case. Include the relevant provider scripts for HLS fallback, for example `craft.polymedia.scripts({ providers: ['mux', 'bunny'] })`. Bunny uses the existing HLS web component; its hosted iframe player is not included.
+
+### Automatically route native MP4 uploads
+
+This is a separate, **Pro-only opt-in**. Enable **Automatically host uploaded MP4 videos**, then select the ordinary asset volumes where it applies. The sidecar volume cannot be selected. With the setting off, native uploads are unchanged, including on sites that only use Spotify or other URL embeds.
+
+For supported uploaders, an author can use Craft's normal upload button or drag and drop. MP4 bytes go directly to the selected provider, and the resulting `.pmedia` goes into the resolved Craft folder. Other file types retain their normal storage path. Mixed batches retain Craft's queue accounting, file limits and completion events.
+
+Routing supports Craft's standard `Craft.Uploader`. If a selected routing volume uses a custom JavaScript uploader, the plugin refuses native upload controls for that filesystem type rather than silently storing raw MP4s. This also disables ordinary new-file uploads through those controls until the developer removes that filesystem's volumes from routing. The explicit **Upload video** action remains available. Custom uploaders unrelated to the selected routing volumes remain native.
+
+Fields must accept the Polymedia kind and selected provider. Dedicated Polymedia fields expose native upload only when routing is enabled. Upload permissions, owner permissions, source/location restrictions and completed-field selection conditions still apply. Replacing an existing file and converting existing MP4 assets are not intercepted.
+
+Provider or authorization failures do not silently upload the MP4 to native storage. Upload progress is separate from processing progress. Cancellation stops the browser transfer; it does **not** delete a video/upload object already created remotely. Incomplete videos can remain in the provider library. Import a successfully uploaded video from the library if completion was interrupted, or remove unwanted incomplete videos in the provider dashboard.
+
+### Bunny Stream library and uploads
+
+1. Select **Bunny Stream** as the video hosting provider.
+2. Configure the Stream **library ID**, its **write API key**, and the native delivery hostname, such as `vz-example.b-cdn.net`.
+3. Store the key in the environment and select a reference such as `$BUNNY_API_KEY`. Do not use the account-wide Bunny key. The library ID and hostname also support environment references.
+4. Use **Browse video library** to search/import existing videos, or **Upload video** for a signed resumable browser upload.
+
+Only anonymous native HLS playback is supported. The plugin checks public playlists before import. Token authentication, referrer-restricted libraries, DRM and custom CDN domains are outside this release. The stored library ID, video ID and hostname are pinned to each imported asset.
+
+Uploads poll automatically. To refresh imported items without webhooks:
+
+```bash
+php craft polymedia/bunny/sync
+```
+
+For optional webhooks, enter an environment reference for the library's **read-only API key** in **Bunny webhook verification key**, and copy the displayed webhook URL into the library's webhook configuration. The endpoint verifies Bunny's raw-body HMAC and refreshes only existing imported records. Callback status codes are not treated as video API state. Transient synchronization failures return `503` for retry.
+
+The optional remote-delete setting is off by default. Only permanent Craft deletion can delete the Bunny video, and only with Pro and matching original-library credentials. Trashing the asset never deletes the video.
+
 ### Mux library & upload (Pro)
 
-1. Install **Pro** and open **Settings → Plugins → Polymedia → Mux**.
+1. Install **Pro**, select **Mux** under **Video hosting**, and expand **Mux connection**.
 2. Add the Mux API **Token ID** and **Token Secret** to each environment, then select their references in plugin settings (for example `$MUX_TOKEN_ID` and `$MUX_TOKEN_SECRET`). Polymedia rejects literal credentials so they cannot be written to project config.
 3. On the Assets index (or field asset modal), open the **Add media** menu and use:
-   - **Browse Mux library** — live list from your Mux account; import creates a `.pmedia` or reuses one matched by **playback ID**.
-   - **Upload to Mux** — browser direct upload (UpChunk); when Mux has a playback ID, Craft creates/reuses the `.pmedia`.
+   - **Browse video library** lists your Mux account; import creates a `.pmedia` or reuses one matched by playback ID.
+   - **Upload video** uploads directly through UpChunk; when Mux has a playback ID, Craft creates or reuses the `.pmedia`.
 
 **Playback policy:** v1 imports **public** playback only. Signed-only assets are flagged in the browse UI and cannot be imported yet.
 
@@ -82,7 +151,7 @@ Optional setting **Delete Mux asset when Craft asset is deleted** (default **off
 
 A Mux item's processing status (`preparing` / `ready` / `errored`) and duration are stored on the media item. Webhooks are optional. The upload flow and console command still work without them:
 
-1. **Polling (default, zero setup).** The Upload to Mux modal polls until the asset is ready and stores its status.
+1. **Polling (default, zero setup).** The Upload video modal polls until a playback ID is available and stores its status.
 2. **Console sync.** Pull current state from the Mux API for every imported item (or one), fetching posters for newly ready assets. Safe to re-run; also repairs items that missed a webhook:
 
    ```

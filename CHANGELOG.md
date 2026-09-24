@@ -1,5 +1,26 @@
 # Changelog
 
+## 2.3.0 - Unreleased
+
+### Added
+- Bunny Stream library search/import, signed resumable direct uploads, metadata/poster synchronization, optional verified webhooks and `polymedia/bunny/sync`.
+- One developer-selected video provider with provider-neutral library and upload controls. Existing assets retain their original hosting provider.
+- Per-provider HLS/MP4 playback defaults, template overrides and HLS fallback. New Mux uploads request static MP4 renditions only when MP4 is preferred.
+- Pro-only, opt-in native MP4 upload routing for selected volumes using Craft's standard uploader. A conflicting custom uploader is refused before transfer; existing-file replacements remain native.
+- Lite **From existing asset** references public Craft-hosted videos by UID without copying or taking ownership of the original.
+- Real jQuery/blueimp queue integration tests alongside picker, playback, provider and upload-authorization regressions.
+
+### Changed
+- Managed video URL/type fields are read-only technical details; authors edit content rather than provider identity.
+- Poster fetches do not follow HTTP redirects.
+- Invalid or unwritable explicit manifest destinations are rejected rather than silently redirected to another volume.
+
+### Upgrade notes
+- HLS remains the default, automatic routing remains off, and existing Mux sites keep their selected provider.
+- No bulk migration, MP4 backfill, remote deletion or schema migration runs on upgrade.
+- Bunny native `*.b-cdn.net` hosts and anonymous public playback only. Hosted player, DRM and signed playback are not included.
+- Live Craft/provider workflow verification is required before tagging this release.
+
 ## 2.2.0 - 2026-09-24
 
 > [!WARNING]

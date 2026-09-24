@@ -305,7 +305,7 @@ class PosterFetcher extends Component
     public function probeRemoteStatus(string $url): ?int
     {
         try {
-            $client = Craft::createGuzzleClient(['timeout' => 10, 'http_errors' => false]);
+            $client = Craft::createGuzzleClient(['timeout' => 10, 'http_errors' => false, 'allow_redirects' => false]);
             $response = $client->head($url);
 
             $status = $response->getStatusCode();
@@ -338,7 +338,7 @@ class PosterFetcher extends Component
     public function downloadToTemp(string $url): ?array
     {
         try {
-            $client = Craft::createGuzzleClient(['timeout' => 30, 'http_errors' => false]);
+            $client = Craft::createGuzzleClient(['timeout' => 30, 'http_errors' => false, 'allow_redirects' => false]);
             $response = $client->get($url);
 
             if ($response->getStatusCode() !== 200) {

@@ -537,6 +537,7 @@ class UrlDetectorTest extends TestCase
         $this->assertContains('dash', $types);
         $this->assertContains('shaka', $types);
         $this->assertContains('mux', $types);
+        $this->assertContains('bunny', $types);
         $this->assertContains('youtube', $types);
         $this->assertContains('vimeo', $types);
         $this->assertContains('spotify', $types);
@@ -549,6 +550,6 @@ class UrlDetectorTest extends TestCase
         $this->assertContains('videojs', $types);
         $this->assertContains('mp4', $types);
         $this->assertContains('audio', $types);
-        $this->assertCount(16, $types);
+        $this->assertCount(17, $types);
     }
 }

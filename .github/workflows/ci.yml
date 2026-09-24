@@ -49,7 +49,10 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Picker regression tests
+      - name: Install upload test dependencies
+        run: npm ci --prefix tests/js --ignore-scripts
+
+      - name: Picker and native upload regression tests
         run: composer test-js
 
       - name: Easy Coding Standard

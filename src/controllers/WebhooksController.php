@@ -104,6 +104,29 @@ class WebhooksController extends Controller
 
         $state = Mux::mapWebhookAssetData($data);
 
+        $isRendition = str_starts_with($type, 'video.asset.static_rendition.')
+            || str_starts_with($type, 'video.asset.static_renditions.');
+        if ($isRendition) {
+            // Singular events contain a rendition id, not an asset id.
+            $assetId = (string)($data['asset_id'] ?? '');
+            if ($assetId === '' && str_starts_with($type, 'video.asset.static_renditions.')) {
+                $assetId = (string)($data['id'] ?? '');
+            }
+            if ($assetId === '' && ($event['object']['type'] ?? null) === 'asset') {
+                $assetId = (string)($event['object']['id'] ?? '');
+            }
+            if ($assetId === '' || !$plugin->getMediaItems()->getByMuxAssetId($assetId)) {
+                return $this->asJson(['ok' => true, 'handled' => false]);
+            }
+            try {
+                $state = $mux->getAsset($assetId);
+            } catch (\Throwable $e) {
+                Craft::error("Mux rendition refresh failed: {$e->getMessage()}", __METHOD__);
+                Craft::$app->getResponse()->setStatusCode(503);
+                return $this->asJson(['ok' => false, 'handled' => false]);
+            }
+        }
+
         if ($state['assetId'] === '') {
             return $this->asJson(['ok' => true, 'handled' => false]);
         }

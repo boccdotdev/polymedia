@@ -33,11 +33,14 @@
   }
 
   Craft.Polymedia = {
-    // Set from PHP via window.CraftPolymediaConfig (Pro + Mux credentials).
-    muxEnabled: !!(
-      window.CraftPolymediaConfig && window.CraftPolymediaConfig.muxEnabled
-    ),
+    // Set from PHP. These flags control presentation, never authorization.
     isPro: !!(window.CraftPolymediaConfig && window.CraftPolymediaConfig.isPro),
+    videoProvider: (window.CraftPolymediaConfig || {}).videoProvider || 'mux',
+    videoEnabled: !!((window.CraftPolymediaConfig || {}).videoEnabled),
+
+    videoAction: function (action) {
+      return 'polymedia/' + Craft.Polymedia.videoProvider + '/' + action;
+    },
 
     init: function () {
       // Catches indexes created after this runs, e.g. asset selection modals.
@@ -57,7 +60,7 @@
         return;
       }
 
-      // Single disclosure: Add media → From URL / Mux browse / Mux upload.
+      // Keep native Craft controls and a single Add media disclosure.
       // Craft’s “Upload files” stays separate (volume file upload).
       // Items are built via Garnish.DisclosureMenu#addItem so activate handlers
       // are wired the same way as native CP menus (delegated activate fails).
@@ -80,6 +83,9 @@
       );
 
       var place = function () {
+        if (assetIndex.$uploadButton) {
+          assetIndex.$uploadButton.data('polymediaIndex', assetIndex);
+        }
         if (assetIndex.settings && assetIndex.settings.context === 'index') {
           // Assets index: immediately before Craft’s Upload files button.
           var $upload = assetIndex.$uploadButton;
@@ -122,8 +128,8 @@
 
       place();
 
-      if (assetIndex.settings && assetIndex.settings.context === 'index') {
-        // Craft rebuilds the upload button on source change — re-place ours.
+      if (typeof assetIndex.on === 'function') {
+        // Craft rebuilds uploaders on source change in indexes and pickers.
         assetIndex.on('selectSource', place);
       }
 
@@ -150,36 +156,44 @@
         label: Craft.t('polymedia', 'From URL'),
         description: Craft.t(
           'polymedia',
-          'Paste a YouTube, Vimeo, Mux, HLS, or other media URL'
+          'Paste a YouTube, Vimeo, HLS, or other media URL'
         ),
         onActivate: function () {
           Craft.Polymedia.openSlideout(assetIndex);
         },
       });
 
-      if (!Craft.Polymedia.muxEnabled) {
+      disclosure.addItem({
+        label: Craft.t('polymedia', 'From existing asset'),
+        description: Craft.t('polymedia', 'Use a video asset without changing the original file'),
+        onActivate: function () {
+          Craft.Polymedia.openSourceAsset(assetIndex);
+        },
+      });
+
+      if (!Craft.Polymedia.videoEnabled) {
         return;
       }
 
       disclosure.addItem({
-        label: Craft.t('polymedia', 'Browse Mux library'),
+        label: Craft.t('polymedia', 'Browse video library'),
         description: Craft.t(
           'polymedia',
-          'Import a video already in your Mux account'
+          'Import a video from your video library'
         ),
         onActivate: function () {
-          Craft.Polymedia.openMuxBrowse(assetIndex);
+          Craft.Polymedia.openVideoBrowse(assetIndex);
         },
       });
 
       disclosure.addItem({
-        label: Craft.t('polymedia', 'Upload to Mux'),
+        label: Craft.t('polymedia', 'Upload video'),
         description: Craft.t(
           'polymedia',
-          'Upload a video file directly to Mux'
+          'Upload a video file to your video library'
         ),
         onActivate: function () {
-          Craft.Polymedia.openMuxUpload(assetIndex);
+          Craft.Polymedia.openVideoUpload(assetIndex);
         },
       });
     },
@@ -209,26 +223,67 @@
       });
     },
 
-    openMuxBrowse: function (assetIndex) {
-      if (!Craft.Polymedia.muxEnabled) {
+    openVideoBrowse: function (assetIndex) {
+      if (!Craft.Polymedia.videoEnabled) {
         return;
       }
 
-      new Craft.Polymedia.MuxBrowseModal({
+      new Craft.Polymedia.VideoBrowseModal({
         assetIndex: assetIndex,
         folderId: Craft.Polymedia._folderId(assetIndex),
       });
     },
 
-    openMuxUpload: function (assetIndex) {
-      if (!Craft.Polymedia.muxEnabled) {
+    openVideoUpload: function (assetIndex) {
+      if (!Craft.Polymedia.videoEnabled) {
         return;
       }
 
-      new Craft.Polymedia.MuxUploadModal({
+      new Craft.Polymedia.VideoUploadModal({
         assetIndex: assetIndex,
         folderId: Craft.Polymedia._folderId(assetIndex),
       });
+    },
+
+    openSourceAsset: function (assetIndex) {
+      Craft.createElementSelectorModal('craft\\elements\\Asset', {
+        multiSelect: false,
+        criteria: {kind: 'video', siteId: assetIndex.siteId || Craft.siteId},
+        onSelect: async function (elements) {
+          if (!elements || !elements.length) return;
+          try {
+            var response = await Craft.sendActionRequest('POST', 'polymedia/source-assets/import', {
+              data: {
+                sourceAssetId: elements[0].id,
+                folderId: Craft.Polymedia._folderId(assetIndex),
+              },
+            });
+            if (await Craft.Polymedia.finishSelection(assetIndex, response.data.assetId)) {
+              Craft.cp.displayNotice(Craft.t('polymedia', 'Media item created.'));
+            }
+          } catch (error) {
+            Craft.cp.displayError(
+              (error.response && error.response.data && error.response.data.message) ||
+              Craft.t('polymedia', 'Could not create media item.')
+            );
+          }
+        },
+      });
+    },
+
+    uploadContext: function (assetIndex) {
+      var context = {
+        folderId: Craft.Polymedia._folderId(assetIndex),
+        siteId: (assetIndex && assetIndex.siteId) || Craft.siteId,
+      };
+      if (Craft.Polymedia.isFieldPicker(assetIndex)) {
+        var input = assetIndex.settings.modal.settings.polymediaInput;
+        if (input && input.settings) {
+          context.fieldId = input.settings.fieldId;
+          context.elementId = input.settings.sourceElementId;
+        }
+      }
+      return context;
     },
 
     _folderId: function (assetIndex) {
@@ -497,9 +552,9 @@
   };
 
   /**
-   * Modal: live Mux library grid with import / reuse.
+   * Modal: configured video library with import / reuse.
    */
-  Craft.Polymedia.MuxBrowseModal = Garnish.Modal.extend({
+  Craft.Polymedia.VideoBrowseModal = Garnish.Modal.extend({
     assetIndex: null,
     folderId: null,
     page: 1,
@@ -521,7 +576,7 @@
       // Not “fitted”: empty/loading states need a stable wide shell (CSS min-width).
       var $container = $(
         '<div class="modal polymedia-mux-modal" role="dialog" aria-label="' +
-          Craft.escapeHtml(Craft.t('polymedia', 'Browse Mux library')) +
+          Craft.escapeHtml(Craft.t('polymedia', 'Browse video library')) +
           '"/>'
       );
 
@@ -534,7 +589,7 @@
       var $header = $(
         '<div class="header">' +
           '<h1>' +
-          Craft.escapeHtml(Craft.t('polymedia', 'Browse Mux library')) +
+          Craft.escapeHtml(Craft.t('polymedia', 'Browse video library')) +
           '</h1>' +
           '</div>'
       );
@@ -694,7 +749,7 @@
       var search = this.searchQuery;
 
       this.page = page;
-      this.$status.text(Craft.t('polymedia', 'Loading Mux library…'));
+      this.$status.text(Craft.t('polymedia', 'Loading video library…'));
       this.$grid.empty();
       this.$pager.empty();
 
@@ -706,7 +761,7 @@
         params.search = search;
       }
 
-      Craft.sendActionRequest('GET', 'polymedia/mux/library', {
+      Craft.sendActionRequest('GET', Craft.Polymedia.videoAction('library'), {
         params: params,
       })
         .then(function (response) {
@@ -723,7 +778,7 @@
             self.$status.text(
               search
                 ? Craft.t('polymedia', 'No videos match your search.')
-                : Craft.t('polymedia', 'No Mux assets found.')
+                : Craft.t('polymedia', 'No videos found.')
             );
             self.updateSizeAndPosition();
             return;
@@ -760,7 +815,7 @@
               error.response &&
               error.response.data &&
               error.response.data.message) ||
-            Craft.t('polymedia', 'Could not load Mux library.');
+            Craft.t('polymedia', 'Could not load video library.');
           self.$status.text(message);
           Craft.cp.displayError(message);
           self.updateSizeAndPosition();
@@ -821,7 +876,7 @@
       var title =
         item.title ||
         item.playbackId ||
-        item.assetId ||
+        item.assetId || item.id ||
         Craft.t('polymedia', 'Untitled');
       var status = item.status || '';
       var thumb = item.thumbnailUrl
@@ -928,23 +983,25 @@
     _import: function (item, $btn) {
       var self = this;
 
-      if (!item.assetId) {
+      var providerId = item.assetId || item.id || item.videoId;
+      if (!providerId) {
         return;
       }
 
       $btn.addClass('loading').prop('disabled', true);
 
-      Craft.sendActionRequest('POST', 'polymedia/mux/import', {
-        data: {
-          muxAssetId: item.assetId,
-          folderId: this.folderId || '',
-          title: item.title || '',
-        },
+      var importData = Object.assign(Craft.Polymedia.uploadContext(this.assetIndex), {
+        folderId: this.folderId || '',
+        title: item.title || '',
+      });
+      importData[Craft.Polymedia.videoProvider === 'bunny' ? 'videoId' : 'muxAssetId'] = providerId;
+      Craft.sendActionRequest('POST', Craft.Polymedia.videoAction('import'), {
+        data: importData,
       })
         .then(async function (response) {
           var data = response.data || {};
           var message =
-            data.message || Craft.t('polymedia', 'Mux media imported.');
+            data.message || Craft.t('polymedia', 'Video imported.');
 
           if (!await Craft.Polymedia.finishSelection(self.assetIndex, data.assetId)) {
             $btn.removeClass('loading').prop('disabled', false);
@@ -968,14 +1025,12 @@
   });
 
   /**
-   * Modal: direct upload a video to Mux via UpChunk, then create `.pmedia`.
+   * Modal: preflight, provider upload, and normal field selection.
    */
-  Craft.Polymedia.MuxUploadModal = Garnish.Modal.extend({
+  Craft.Polymedia.VideoUploadModal = Garnish.Modal.extend({
     assetIndex: null,
     folderId: null,
-    uploadId: null,
-    pollTimer: null,
-    upchunk: null,
+    uploadTask: null,
     busy: false,
     $title: null,
     $file: null,
@@ -993,13 +1048,13 @@
 
       var $container = $(
         '<div class="modal polymedia-mux-upload-modal" role="dialog" aria-label="' +
-          Craft.escapeHtml(Craft.t('polymedia', 'Upload to Mux')) +
+          Craft.escapeHtml(Craft.t('polymedia', 'Upload video')) +
           '"/>'
       );
 
       var $header = $(
         '<div class="header"><h1>' +
-          Craft.escapeHtml(Craft.t('polymedia', 'Upload to Mux')) +
+          Craft.escapeHtml(Craft.t('polymedia', 'Upload video')) +
           '</h1></div>'
       );
 
@@ -1171,7 +1226,20 @@
         return;
       }
 
-      if (typeof UpChunk === 'undefined' || !UpChunk.createUpload) {
+      if (Craft.Polymedia.isFieldPicker(this.assetIndex)) {
+        var modal = this.assetIndex.settings.modal;
+        var input = modal.settings.polymediaInput;
+        var replacing = input && input._$replaceElement &&
+          input.getSelectedElementIds().some(function (id) {
+            return Number(id) === Number(input._$replaceElement.data('id'));
+          });
+        if (!input || input.modal !== modal || (!replacing && !input.canAddMoreElements())) {
+          Craft.cp.displayError(Craft.t('polymedia', 'The field cannot accept another media item.'));
+          return;
+        }
+      }
+
+      if (!Craft.PolymediaVideoUpload) {
         Craft.cp.displayError(Craft.t('polymedia', 'Upload failed.'));
         return;
       }
@@ -1182,52 +1250,23 @@
       this._setProgress(0);
       this._setStatus(Craft.t('polymedia', 'Uploading…'));
 
-      Craft.sendActionRequest('POST', 'polymedia/mux/create-upload', {
-        data: {
+      var task = Craft.PolymediaVideoUpload(file,
+        Object.assign(Craft.Polymedia.uploadContext(this.assetIndex), {
+          routing: false,
           title: this.$title.val() || '',
-          folderId: this.folderId || '',
-        },
-      })
-        .then(function (response) {
-          var data = response.data || {};
-
-          if (!data.uploadUrl || !data.uploadId) {
-            throw new Error(Craft.t('polymedia', 'Upload failed.'));
-          }
-
-          self.uploadId = data.uploadId;
-          if (data.folderId) {
-            self.folderId = data.folderId;
-          }
-
-          self.upchunk = UpChunk.createUpload({
-            endpoint: data.uploadUrl,
-            file: file,
-            chunkSize: 5120,
-          });
-
-          self.upchunk.on('progress', function (ev) {
-            var pct =
-              typeof ev.detail === 'number'
-                ? ev.detail
-                : (ev.detail && ev.detail.progress) || 0;
-            self._setProgress(pct);
-          });
-
-          self.upchunk.on('error', function (ev) {
-            var msg =
-              (ev.detail && ev.detail.message) ||
-              Craft.t('polymedia', 'Upload failed.');
-            self._fail(msg);
-          });
-
-          self.upchunk.on('success', function () {
-            self._setProgress(100);
-            self._setStatus(Craft.t('polymedia', 'Processing on Mux…'));
-            self._pollStatus();
-          });
+        }), function (percent) {
+          if (self.uploadTask !== task) return;
+          self._setProgress(percent);
+          if (percent >= 100) self._setStatus(Craft.t('polymedia', 'Processing video…'));
+        });
+      this.uploadTask = task;
+      task.promise
+        .then(function (data) {
+          if (self.uploadTask !== task) return;
+          return self._complete(data);
         })
         .catch(function (error) {
+          if (self.uploadTask !== task) return;
           var message =
             (error &&
               error.response &&
@@ -1239,129 +1278,21 @@
         });
     },
 
-    _pollStatus: function () {
-      var self = this;
-      var attempts = 0;
-      var maxAttempts = 90;
-
-      var tick = function () {
-        if (!self.busy) {
-          return;
-        }
-
-        attempts += 1;
-
-        // POST + body `data` (Craft/axios GET `data` is not sent as query params,
-        // so uploadId was missing and the endpoint returned 400 forever).
-        Craft.sendActionRequest('POST', 'polymedia/mux/upload-status', {
-          data: { uploadId: self.uploadId },
-        })
-          .then(function (response) {
-            var data = response.data || {};
-
-            if (data.failed) {
-              self._fail(
-                data.message || Craft.t('polymedia', 'Upload failed.')
-              );
-              return;
-            }
-
-            if (data.ready && data.assetId) {
-              self._complete(data.assetId);
-              return;
-            }
-
-            // Still waiting for Mux asset/playback id
-            if (data.status) {
-              self._setStatus(
-                Craft.t('polymedia', 'Processing on Mux…') +
-                  ' (' +
-                  data.status +
-                  ')'
-              );
-            }
-
-            if (attempts >= maxAttempts) {
-              self._fail(Craft.t('polymedia', 'Upload failed.'));
-              return;
-            }
-
-            self.pollTimer = setTimeout(tick, 2000);
-          })
-          .catch(function (error) {
-            var status =
-              error && error.response && error.response.status
-                ? error.response.status
-                : 0;
-            var message =
-              (error &&
-                error.response &&
-                error.response.data &&
-                error.response.data.message) ||
-              Craft.t('polymedia', 'Upload failed.');
-
-            // Auth/validation errors will not recover — stop immediately.
-            if (status === 400 || status === 403 || status === 404) {
-              self._fail(message);
-              return;
-            }
-
-            if (attempts >= maxAttempts) {
-              self._fail(message);
-              return;
-            }
-
-            self.pollTimer = setTimeout(tick, 3000);
-          });
-      };
-
-      tick();
-    },
-
-    _complete: function (muxAssetId) {
-      var self = this;
-
-      this._setStatus(Craft.t('polymedia', 'Creating media item…'));
-
-      Craft.sendActionRequest('POST', 'polymedia/mux/complete-upload', {
-        data: {
-          muxAssetId: muxAssetId,
-          uploadId: this.uploadId || '',
-          folderId: this.folderId || '',
-          title: this.$title.val() || '',
-        },
-      })
-        .then(async function (response) {
-          var data = response.data || {};
-          var message =
-            data.message || Craft.t('polymedia', 'Mux upload complete.');
-
-          if (!await Craft.Polymedia.finishSelection(self.assetIndex, data.assetId)) {
-            self.busy = false;
-            self._setUiBusy(false);
-            self._setStatus(Craft.t('polymedia', 'Media created, but not selected.'));
-            return;
-          }
-
-          Craft.cp.displayNotice(message);
-          self.busy = false;
-          self.hide();
-        })
-        .catch(function (error) {
-          var message =
-            (error &&
-              error.response &&
-              error.response.data &&
-              error.response.data.message) ||
-            Craft.t('polymedia', 'Upload failed.');
-          self._fail(message);
-        });
+    _complete: async function (data) {
+      if (!await Craft.Polymedia.finishSelection(this.assetIndex, data.assetId)) {
+        this.busy = false;
+        this._setUiBusy(false);
+        this._setStatus(Craft.t('polymedia', 'Media created, but not selected.'));
+        return;
+      }
+      Craft.cp.displayNotice(data.message || Craft.t('polymedia', 'Video upload complete.'));
+      this.busy = false;
+      this.hide();
     },
 
     _fail: function (message) {
       this.busy = false;
-      this._clearTimers();
-      this._abortUpchunk();
+      this._abortUpload();
       this._setUiBusy(false);
       this._setStatus(message);
       Craft.cp.displayError(message);
@@ -1369,8 +1300,7 @@
 
     onCancel: function () {
       if (this.busy) {
-        this._abortUpchunk();
-        this._clearTimers();
+        this._abortUpload();
         this.busy = false;
         this._setUiBusy(false);
         this._setStatus(Craft.t('polymedia', 'Upload cancelled.'));
@@ -1381,28 +1311,20 @@
     },
 
     onFadeOut: function () {
-      this._clearTimers();
-      this._abortUpchunk();
+      this._abortUpload();
       this.base();
     },
 
-    _abortUpchunk: function () {
-      if (this.upchunk && typeof this.upchunk.abort === 'function') {
+    _abortUpload: function () {
+      if (this.uploadTask && typeof this.uploadTask.abort === 'function') {
         try {
-          this.upchunk.abort();
+          this.uploadTask.abort();
         } catch (e) {
           // ignore
         }
       }
 
-      this.upchunk = null;
-    },
-
-    _clearTimers: function () {
-      if (this.pollTimer) {
-        clearTimeout(this.pollTimer);
-        this.pollTimer = null;
-      }
+      this.uploadTask = null;
     },
 
     _setUiBusy: function (busy) {

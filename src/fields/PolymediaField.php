@@ -68,11 +68,12 @@ class PolymediaField extends Assets
     {
         $config['restrictFiles'] = true;
         $config['allowedKinds'] = ['polymedia'];
+        // Keep field/project config independent of the site's edition and
+        // provider credentials. Upload availability is computed while rendering.
         $config['allowUploads'] = false;
+        $plugin = Plugin::getInstance();
 
         if (!isset($config['id'])) {
-            $plugin = Plugin::getInstance();
-
             if ($plugin) {
                 $settings = $plugin->getSettings();
                 $config['allowedProviders'] = $config['allowedProviders'] ?? $settings->defaultFieldAllowedProviders;
@@ -92,6 +93,36 @@ class PolymediaField extends Assets
         $rules[] = [['allowedProviders'], 'each', 'rule' => ['string']];
 
         return $rules;
+    }
+
+    /**
+     * Do not offer a native upload button for a media-only field whose actual
+     * destination or provider cannot participate in automatic routing.
+     */
+    protected function inputHtml(mixed $value, ?\craft\base\ElementInterface $element, bool $inline): string
+    {
+        $original = $this->allowUploads;
+        try {
+            $plugin = Plugin::getInstance();
+            $settings = $plugin->getSettings();
+            $this->allowUploads = $settings->autoRouteVideoUploads
+                && $settings->videoUploadVolumeUids !== []
+                && $plugin->getVideoEnabled();
+            if ($this->allowUploads) {
+                $folder = Craft::$app->getAssets()->getFolderById($this->resolveDynamicPathToFolderId($element));
+                $this->allowUploads = $folder
+                    && in_array($folder->getVolume()->uid, $settings->videoUploadVolumeUids, true)
+                    && ($this->allowedProviders === [] || in_array($settings->videoProvider, $this->allowedProviders, true));
+            }
+        } catch (\Throwable) {
+            $this->allowUploads = false;
+        }
+
+        try {
+            return parent::inputHtml($value, $element, $inline);
+        } finally {
+            $this->allowUploads = $original;
+        }
     }
 
     /**

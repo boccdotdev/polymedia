@@ -24,6 +24,8 @@ use boccdotdev\polymedia\models\PlayerSettings;
 use boccdotdev\polymedia\models\Settings;
 use boccdotdev\polymedia\records\MediaItemRecord;
 use boccdotdev\polymedia\services\AssetFieldSettings;
+use boccdotdev\polymedia\services\Bunny;
+use boccdotdev\polymedia\services\BunnySync;
 use boccdotdev\polymedia\services\EditorContent;
 use boccdotdev\polymedia\services\ManifestWriter;
 use boccdotdev\polymedia\services\MediaItems;
@@ -33,8 +35,10 @@ use boccdotdev\polymedia\services\ProviderFilter;
 use boccdotdev\polymedia\services\RelatedAssets;
 use boccdotdev\polymedia\services\Renderer;
 use boccdotdev\polymedia\services\SidecarStorage;
+use boccdotdev\polymedia\services\SourceAssets;
 use boccdotdev\polymedia\services\ThumbnailDeriver;
 use boccdotdev\polymedia\services\UrlDetector;
+use boccdotdev\polymedia\services\VideoUploads;
 use boccdotdev\polymedia\variables\PolymediaVariable;
 use boccdotdev\polymedia\web\assets\cp\PolymediaAsset;
 use Craft;
@@ -89,6 +93,10 @@ use yii\base\Event;
  * @property-read ProviderFilter $providerFilter
  * @property-read EditorContent $editorContent
  * @property-read Mux $mux
+ * @property-read Bunny $bunny
+ * @property-read BunnySync $bunnySync
+ * @property-read SourceAssets $sourceAssets
+ * @property-read VideoUploads $videoUploads
  * @property-read PosterFetcher $posterFetcher
  * @property-read SidecarStorage $sidecarStorage
  *
@@ -106,7 +114,7 @@ class Plugin extends BasePlugin
     public const EDITION_LITE = 'lite';
 
     /**
-     * Commercial edition: Lite + Mux credentials, library browse, direct upload.
+     * Commercial edition: Lite + hosted video libraries and direct uploads.
      */
     public const EDITION_PRO = 'pro';
 
@@ -166,6 +174,10 @@ class Plugin extends BasePlugin
             'providerFilter' => ProviderFilter::class,
             'editorContent' => EditorContent::class,
             'mux' => Mux::class,
+            'bunny' => Bunny::class,
+            'bunnySync' => BunnySync::class,
+            'sourceAssets' => SourceAssets::class,
+            'videoUploads' => VideoUploads::class,
             'posterFetcher' => PosterFetcher::class,
             'sidecarStorage' => SidecarStorage::class,
         ]);
@@ -214,6 +226,43 @@ class Plugin extends BasePlugin
     public function getMuxEnabled(): bool
     {
         return $this->getIsPro() && $this->getMux()->isConfigured();
+    }
+
+    /**
+     * Whether Bunny credentials may be used, including sync for older assets.
+     *
+     * @since 2.3.0
+     */
+    public function isBunnyEnabled(): bool
+    {
+        return $this->getIsPro() && $this->getBunny()->isConfigured();
+    }
+
+    /**
+     * New uploads and library imports use only the developer-selected provider.
+     * Playback and synchronization of existing assets do not use this gate.
+     *
+     * @since 2.3.0
+     */
+    public function isVideoProviderEnabled(string $provider): bool
+    {
+        if ($provider !== $this->getSettings()->videoProvider) {
+            return false;
+        }
+
+        return match ($provider) {
+            'mux' => $this->getMuxEnabled(),
+            'bunny' => $this->isBunnyEnabled(),
+            default => false,
+        };
+    }
+
+    /**
+     * @since 2.3.0
+     */
+    public function getVideoEnabled(): bool
+    {
+        return $this->isVideoProviderEnabled($this->getSettings()->videoProvider);
     }
 
     /**
@@ -347,6 +396,38 @@ class Plugin extends BasePlugin
     }
 
     /**
+     * @since 2.3.0
+     */
+    public function getBunny(): Bunny
+    {
+        return $this->get('bunny');
+    }
+
+    /**
+     * @since 2.3.0
+     */
+    public function getBunnySync(): BunnySync
+    {
+        return $this->get('bunnySync');
+    }
+
+    /**
+     * @since 2.3.0
+     */
+    public function getSourceAssets(): SourceAssets
+    {
+        return $this->get('sourceAssets');
+    }
+
+    /**
+     * @since 2.3.0
+     */
+    public function getVideoUploads(): VideoUploads
+    {
+        return $this->get('videoUploads');
+    }
+
+    /**
      * Returns the poster fetcher service.
      *
      * @return PosterFetcher
@@ -414,9 +495,13 @@ class Plugin extends BasePlugin
             'volumeOptions' => $volumeOptions,
             'isPro' => $this->getIsPro(),
             'muxConfigured' => $this->getMux()->isConfigured(),
+            'bunnyConfigured' => $this->getBunny()->isConfigured(),
             // Site action URL (actionUrl() would prepend the CP trigger here).
             'muxWebhookUrl' => UrlHelper::siteUrl(
                 Craft::$app->getConfig()->getGeneral()->actionTrigger . '/polymedia/webhooks/mux',
+            ),
+            'bunnyWebhookUrl' => UrlHelper::siteUrl(
+                Craft::$app->getConfig()->getGeneral()->actionTrigger . '/polymedia/bunny-webhooks/index',
             ),
         ]);
     }
@@ -515,6 +600,7 @@ class Plugin extends BasePlugin
                 $record = $deleting[(int)$asset->id] ?? null;
                 unset($deleting[(int)$asset->id]);
                 $this->_maybeDeleteMuxAsset($record);
+                $this->_maybeDeleteBunnyAsset($record);
 
                 $cleanup = function() use ($asset): bool {
                     $this->getSidecarStorage()->deleteForAsset($asset);
@@ -602,6 +688,32 @@ class Plugin extends BasePlugin
                 "Polymedia: failed to delete Mux asset {$muxAssetId}: {$e->getMessage()}",
                 __METHOD__,
             );
+        }
+    }
+
+    /**
+     * Remote deletion requires credentials for the asset's original library,
+     * independently of which provider is selected for new uploads.
+     */
+    private function _maybeDeleteBunnyAsset(?MediaItemRecord $record): void
+    {
+        if (!$record || $record->type !== 'bunny' || !$this->getSettings()->deleteBunnyAssetOnDelete) {
+            return;
+        }
+
+        $metadata = $this->getMediaItems()->getMetadata($record);
+        $libraryId = (string)($metadata['bunnyLibraryId'] ?? '');
+        $videoId = (string)($metadata['bunnyVideoId'] ?? '');
+
+        if (!$this->isBunnyEnabled() || $videoId === '' || $libraryId === '' || $libraryId !== (string)$this->getBunny()->getLibraryId()) {
+            Craft::warning("Polymedia: skipping remote Bunny deletion for asset #{$record->assetId}; Pro and matching library credentials are required.", __METHOD__);
+            return;
+        }
+
+        try {
+            $this->getBunny()->deleteAsset($videoId);
+        } catch (\Throwable $e) {
+            Craft::error("Polymedia: remote Bunny deletion failed for asset #{$record->assetId}: {$e->getMessage()}", __METHOD__);
         }
     }
 
@@ -872,6 +984,10 @@ class Plugin extends BasePlugin
             return;
         }
 
+        if ($this->getEditorContent()->isManagedVideo($record)) {
+            return;
+        }
+
         $newType = $request->getBodyParam('polymediaType');
         $urlChanged = false;
 
@@ -1091,7 +1207,7 @@ class Plugin extends BasePlugin
     }
 
     /**
-     * Registers the CP asset bundle on CP requests and passes Mux feature flags.
+     * Registers the CP asset bundle and non-secret video feature flags.
      */
     private function _registerCpAssets(): void
     {
@@ -1104,6 +1220,14 @@ class Plugin extends BasePlugin
             View::EVENT_BEFORE_RENDER_TEMPLATE,
             function() {
                 $view = Craft::$app->getView();
+                $routingFsTypes = [];
+                if ($this->getSettings()->autoRouteVideoUploads) {
+                    foreach (Craft::$app->getVolumes()->getAllVolumes() as $volume) {
+                        if (in_array($volume->uid, $this->getSettings()->videoUploadVolumeUids, true)) {
+                            $routingFsTypes[] = get_class($volume->getFs());
+                        }
+                    }
+                }
                 $view->registerAssetBundle(PolymediaAsset::class);
                 $view->registerTranslations('polymedia', [
                     'Add media',
@@ -1145,11 +1269,33 @@ class Plugin extends BasePlugin
                     'Choose a video file.',
                     'Poster will be generated from the first frame when ready.',
                     'Cancel',
+                    'From existing asset',
+                    'Use a video asset without changing the original file',
+                    'Browse video library',
+                    'Import a video from your video library',
+                    'Upload video',
+                    'Upload a video file to your video library',
+                    'Loading video library…',
+                    'No videos found.',
+                    'Could not load video library.',
+                    'Video imported.',
+                    'Processing video…',
+                    'Video upload complete.',
+                    'Could not create media item.',
+                    'Paste a YouTube, Vimeo, HLS, or other media URL',
+                    'Automatic video routing is unavailable for this filesystem. Use Upload video to send videos to the video library.',
+                    'Native uploads are disabled for this custom filesystem because it was selected for automatic video routing. Remove its volumes from automatic routing, or use Upload video.',
+                    'The field cannot accept another media item.',
                 ]);
                 $view->registerJs(
                     'window.CraftPolymediaConfig = ' . Json::encode([
                         'muxEnabled' => $this->getMuxEnabled(),
                         'isPro' => $this->getIsPro(),
+                        'videoProvider' => $this->getSettings()->videoProvider,
+                        'videoEnabled' => $this->getVideoEnabled(),
+                        'autoRouteVideoUploads' => $this->getVideoEnabled() && $this->getSettings()->autoRouteVideoUploads,
+                        'videoUploadVolumeUids' => $this->getSettings()->videoUploadVolumeUids,
+                        'videoUploadFsTypes' => array_values(array_unique($routingFsTypes)),
                     ]) . ';',
                     View::POS_HEAD,
                 );
@@ -1201,6 +1347,7 @@ class Plugin extends BasePlugin
             function() {
                 MediaItemLoader::reset();
                 RelatedAssetLoader::reset();
+                $this->getSourceAssets()->reset();
             },
         );
     }

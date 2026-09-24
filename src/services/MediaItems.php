@@ -534,6 +534,12 @@ class MediaItems extends Component
             $changed = true;
         }
 
+        if (array_key_exists('mp4Renditions', $state) && is_array($state['mp4Renditions'])
+            && ($metadata['mp4Renditions'] ?? null) !== $state['mp4Renditions']) {
+            $metadata['mp4Renditions'] = $state['mp4Renditions'];
+            $changed = true;
+        }
+
         if (isset($state['duration']) && is_numeric($state['duration'])) {
             $incoming = (int)round((float)$state['duration']);
 

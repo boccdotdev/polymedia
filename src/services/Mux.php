@@ -22,6 +22,7 @@ use MuxPhp\Configuration;
 use MuxPhp\Models\Asset;
 use MuxPhp\Models\AssetMetadata;
 use MuxPhp\Models\CreateAssetRequest;
+use MuxPhp\Models\CreateStaticRenditionRequest;
 use MuxPhp\Models\CreateUploadRequest;
 use MuxPhp\Models\PlaybackID;
 use MuxPhp\Models\PlaybackPolicy;
@@ -268,6 +269,9 @@ class Mux extends Component
             'playbackPolicy' => $playbackPolicy,
             'status' => isset($data['status']) ? (string)$data['status'] : '',
             'duration' => $data['duration'] ?? null,
+            ...(array_key_exists('static_renditions', $data) ? [
+                'mp4Renditions' => self::mapMp4Renditions($data, $playbackPolicy === 'public' ? $playbackId : null),
+            ] : []),
         ];
     }
 
@@ -421,6 +425,11 @@ class Mux extends Component
         $newAssetSettings = new CreateAssetRequest([
             'playback_policy' => [PlaybackPolicy::_PUBLIC],
         ]);
+
+        $settings = Plugin::getInstance()->getSettings();
+        if ($settings->muxDefaultPlaybackFormat === 'mp4') {
+            $newAssetSettings->setStaticRenditions([new CreateStaticRenditionRequest(['resolution' => 'highest'])]);
+        }
 
         if ($title !== '') {
             $newAssetSettings->setMeta(new AssetMetadata(['title' => $title]));
@@ -584,7 +593,38 @@ class Mux extends Component
             'thumbnailUrl' => $thumbnailUrl,
             'createdAt' => $asset->getCreatedAt(),
             'passthrough' => $asset->getPassthrough(),
+            'mp4Renditions' => self::mapMp4Renditions(
+                json_decode(json_encode($asset), true) ?? [],
+                $playback['policy'] === 'public' ? $playbackId : null,
+            ),
         ];
+    }
+
+    /**
+     * Maps current per-file state and legacy mp4_support aggregate state.
+     * Never infer MP4 readiness from the asset's HLS status.
+     */
+    public static function mapMp4Renditions(array $asset, ?string $playbackId): array
+    {
+        if (!$playbackId || !preg_match('/^[a-zA-Z0-9]+$/D', $playbackId)) {
+            return [];
+        }
+        $static = $asset['static_renditions'] ?? [];
+        $legacy = !empty($asset['mp4_support']) && $asset['mp4_support'] !== 'none';
+        $result = [];
+        foreach ((array)($static['files'] ?? []) as $file) {
+            $name = $file['name'] ?? '';
+            if (!is_string($name) || !preg_match('/^[a-zA-Z0-9][a-zA-Z0-9_-]*\.mp4$/D', $name)) {
+                continue;
+            }
+            $result[] = [
+                'url' => "https://stream.mux.com/{$playbackId}/{$name}",
+                'status' => $file['status'] ?? ($legacy ? ($static['status'] ?? 'preparing') : 'preparing'),
+                'width' => (int)($file['width'] ?? 0),
+                'height' => (int)($file['height'] ?? 0),
+            ];
+        }
+        return $result;
     }
 
     /**

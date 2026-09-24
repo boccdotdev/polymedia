@@ -103,6 +103,7 @@
         { label: 'DASH', value: 'dash' },
         { label: 'Shaka', value: 'shaka' },
         { label: 'Mux', value: 'mux' },
+        { label: 'Bunny Stream', value: 'bunny' },
         { label: 'YouTube', value: 'youtube' },
         { label: 'Vimeo', value: 'vimeo' },
         { label: 'Spotify', value: 'spotify' },
@@ -157,13 +158,13 @@
 
 <hr>
 
-<h2>{{ 'Mux'|t('polymedia') }}</h2>
+<h2>{{ 'Video hosting'|t('polymedia') }}</h2>
 
 {% if not isPro %}
     <div class="readable">
         <blockquote class="note tip">
             <p>
-                {{ 'Mux library browse and direct upload require Polymedia Pro. Paste a Mux stream URL still works on Lite.'|t('polymedia') }}
+                {{ 'Connected video libraries, direct uploads and automatic MP4 routing require Polymedia Pro. URL embeds and references to existing Craft videos work on Lite. Ordinary uploads are unchanged.'|t('polymedia') }}
             </p>
             <p>
                 <a href="https://plugins.craftcms.com/polymedia" target="_blank" rel="noopener">
@@ -173,15 +174,45 @@
         </blockquote>
     </div>
 {% else %}
-    {% if not muxConfigured %}
-        <div class="readable">
-            <blockquote class="note">
-                <p>
-                    {{ 'Add both a Token ID and Secret to enable Browse Mux library and Upload to Mux in the Assets index.'|t('polymedia') }}
-                </p>
-            </blockquote>
-        </div>
-    {% endif %}
+    {{ forms.selectField({
+        label: 'Video hosting provider'|t('polymedia'),
+        instructions: 'Used for new uploads and library browsing. Authors see a single video library. Existing assets keep their original provider; changing this does not migrate videos.'|t('polymedia'),
+        id: 'videoProvider',
+        name: 'videoProvider',
+        value: settings.videoProvider,
+        options: [
+            { label: 'Mux', value: 'mux' },
+            { label: 'Bunny Stream', value: 'bunny' },
+        ],
+        errors: settings.getErrors('videoProvider'),
+        disabled: not allowAdminChanges,
+    }) }}
+
+    {{ forms.lightswitchField({
+        label: 'Automatically host uploaded MP4 videos'|t('polymedia'),
+        instructions: 'Opt in to routing new MP4 uploads from Craft’s standard uploader to the selected provider. Craft stores a .pmedia reference instead of the video. Other files and existing-file replacements keep their normal upload behavior. Disabled by default. Selecting a filesystem with a custom uploader disables its native upload controls until it is removed from routing.'|t('polymedia'),
+        id: 'autoRouteVideoUploads',
+        name: 'autoRouteVideoUploads',
+        on: settings.autoRouteVideoUploads,
+        errors: settings.getErrors('autoRouteVideoUploads'),
+        disabled: not allowAdminChanges,
+    }) }}
+
+    {{ forms.checkboxGroupField({
+        label: 'Automatic video upload volumes'|t('polymedia'),
+        instructions: 'Only new MP4 uploads targeting these volumes are routed. An empty selection routes nothing. Fields must accept the Polymedia file kind and the selected provider.'|t('polymedia'),
+        id: 'videoUploadVolumeUids',
+        name: 'videoUploadVolumeUids',
+        values: settings.videoUploadVolumeUids,
+        options: volumeOptions|filter(option => option.value and option.value != settings.sidecarVolumeUid),
+        errors: settings.getErrors('videoUploadVolumeUids'),
+        disabled: not allowAdminChanges,
+    }) }}
+
+    <p class="light">{{ 'Keep credentials for an older provider if its existing assets still need synchronization. Only the selected provider accepts new uploads and imports.'|t('polymedia') }}</p>
+
+    <details {% if settings.videoProvider == 'mux' %}open{% endif %}>
+    <summary><strong>{{ 'Mux connection'|t('polymedia') }}</strong></summary>
 
     {{ forms.autosuggestField({
         label: 'Mux Token ID'|t('polymedia'),
@@ -202,6 +233,20 @@
         value: settings.muxTokenSecret,
         suggestEnvVars: true,
         errors: settings.getErrors('muxTokenSecret'),
+        disabled: not allowAdminChanges,
+    }) }}
+
+    {{ forms.selectField({
+        label: 'Default playback format'|t('polymedia'),
+        instructions: 'HLS adapts to the viewer’s connection. MP4 uses the highest ready rendition, falling back to HLS while unavailable. MP4 preference requests a rendition for new uploads and may add Mux charges. Existing videos are not re-encoded.'|t('polymedia'),
+        id: 'muxDefaultPlaybackFormat',
+        name: 'muxDefaultPlaybackFormat',
+        value: settings.muxDefaultPlaybackFormat,
+        options: [
+            { label: 'HLS (recommended)'|t('polymedia'), value: 'hls' },
+            { label: 'MP4 when available'|t('polymedia'), value: 'mp4' },
+        ],
+        errors: settings.getErrors('muxDefaultPlaybackFormat'),
         disabled: not allowAdminChanges,
     }) }}
 
@@ -232,6 +277,85 @@
         class: 'code',
         value: muxWebhookUrl,
     }) }}
+    </details>
+
+    <details {% if settings.videoProvider == 'bunny' %}open{% endif %}>
+    <summary><strong>{{ 'Bunny Stream connection'|t('polymedia') }}</strong></summary>
+
+    {{ forms.autosuggestField({
+        label: 'Bunny library ID'|t('polymedia'),
+        instructions: 'The Stream video library ID. Supports an environment variable such as `$BUNNY_LIBRARY_ID`.'|t('polymedia'),
+        id: 'bunnyLibraryId',
+        name: 'bunnyLibraryId',
+        value: settings.bunnyLibraryId,
+        suggestEnvVars: true,
+        errors: settings.getErrors('bunnyLibraryId'),
+        disabled: not allowAdminChanges,
+    }) }}
+
+    {{ forms.autosuggestField({
+        label: 'Bunny library API key'|t('polymedia'),
+        instructions: 'Use an environment reference such as `$BUNNY_API_KEY` for this library’s write API key, not your account-wide key. The key is never sent to the browser.'|t('polymedia'),
+        id: 'bunnyApiKey',
+        name: 'bunnyApiKey',
+        value: settings.bunnyApiKey,
+        suggestEnvVars: true,
+        errors: settings.getErrors('bunnyApiKey'),
+        disabled: not allowAdminChanges,
+    }) }}
+
+    {{ forms.autosuggestField({
+        label: 'Bunny CDN hostname'|t('polymedia'),
+        instructions: 'The library’s delivery hostname, for example `vz-example.b-cdn.net`, without https:// or a path. Custom domains, token-protected playback and DRM are not supported in this release.'|t('polymedia'),
+        id: 'bunnyCdnHostname',
+        name: 'bunnyCdnHostname',
+        value: settings.bunnyCdnHostname,
+        suggestEnvVars: true,
+        errors: settings.getErrors('bunnyCdnHostname'),
+        disabled: not allowAdminChanges,
+    }) }}
+
+    {{ forms.selectField({
+        label: 'Default playback format'|t('polymedia'),
+        instructions: 'MP4 uses the highest verified available file, otherwise HLS. Enable MP4 fallback in Bunny before uploading videos. Changing this preference does not enable Bunny encoding settings or regenerate older videos.'|t('polymedia'),
+        id: 'bunnyDefaultPlaybackFormat',
+        name: 'bunnyDefaultPlaybackFormat',
+        value: settings.bunnyDefaultPlaybackFormat,
+        options: [
+            { label: 'HLS (recommended)'|t('polymedia'), value: 'hls' },
+            { label: 'MP4 when available'|t('polymedia'), value: 'mp4' },
+        ],
+        errors: settings.getErrors('bunnyDefaultPlaybackFormat'),
+        disabled: not allowAdminChanges,
+    }) }}
+
+    {{ forms.lightswitchField({
+        label: 'Delete Bunny video when Craft asset is deleted'|t('polymedia'),
+        instructions: 'Hard deletion only, with credentials for the asset’s original library. Trashing an asset never deletes the video. Disabled by default.'|t('polymedia'),
+        id: 'deleteBunnyAssetOnDelete',
+        name: 'deleteBunnyAssetOnDelete',
+        on: settings.deleteBunnyAssetOnDelete,
+        disabled: not allowAdminChanges,
+    }) }}
+
+    {{ forms.autosuggestField({
+        label: 'Bunny webhook verification key'|t('polymedia'),
+        instructions: 'Optional. Use an environment reference for this library’s read-only API key, which Bunny uses to sign webhook payloads. Leave blank to disable webhooks; upload polling and console sync remain available.'|t('polymedia'),
+        id: 'bunnyWebhookKey',
+        name: 'bunnyWebhookKey',
+        value: settings.bunnyWebhookKey,
+        suggestEnvVars: true,
+        errors: settings.getErrors('bunnyWebhookKey'),
+        disabled: not allowAdminChanges,
+    }) }}
+
+    {{ forms.copytextField({
+        label: 'Bunny webhook URL'|t('polymedia'),
+        id: 'bunnyWebhookUrl',
+        class: 'code',
+        value: bunnyWebhookUrl,
+    }) }}
+    </details>
 {% endif %}
 
 <hr>
@@ -249,6 +373,7 @@
         { label: 'DASH', value: 'dash' },
         { label: 'Shaka', value: 'shaka' },
         { label: 'Mux', value: 'mux' },
+        { label: 'Bunny Stream', value: 'bunny' },
         { label: 'YouTube', value: 'youtube' },
         { label: 'Vimeo', value: 'vimeo' },
         { label: 'Spotify', value: 'spotify' },

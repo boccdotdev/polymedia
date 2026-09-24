@@ -190,6 +190,7 @@ class UrlDetector extends Component
             'dash' => 'dash-video',
             'shaka' => 'shaka-video',
             'mux' => 'mux-video',
+            'bunny' => 'hls-video',
             'youtube' => 'youtube-video',
             'vimeo' => 'vimeo-video',
             'spotify' => 'spotify-audio',

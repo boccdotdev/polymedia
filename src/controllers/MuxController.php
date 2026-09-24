@@ -145,21 +145,12 @@ class MuxController extends Controller
         $plugin = Plugin::getInstance();
         $request = Craft::$app->getRequest();
         $title = trim((string)$request->getBodyParam('title', ''));
-        $folderId = (int)$request->getBodyParam('folderId') ?: null;
-
-        $settings = $plugin->getSettings();
-        $currentUser = Craft::$app->getUser()->getIdentity();
-        $folder = $plugin->getManifestWriter()->resolveFolder($folderId, $currentUser, $settings);
-
-        if (!$folder) {
-            return $this->asFailure(Craft::t(
-                'polymedia',
-                'Choose a writable library volume for media. The sidecar volume cannot contain media manifests.',
-            ));
-        }
 
         try {
-            $upload = $plugin->getMux()->createDirectUpload($title);
+            $upload = $plugin->getVideoUploads()->createUpload(
+                'mux',
+                fn(): array => $plugin->getMux()->createDirectUpload($title),
+            );
         } catch (\Throwable $e) {
             return $this->asFailure($e->getMessage());
         }
@@ -175,7 +166,7 @@ class MuxController extends Controller
             'uploadId' => $upload['uploadId'],
             'uploadUrl' => $upload['uploadUrl'],
             'status' => $upload['status'],
-            'folderId' => (int)$folder->id,
+            'folderId' => (int)$upload['folderId'],
             'title' => $title,
         ]);
     }
@@ -215,6 +206,8 @@ class MuxController extends Controller
         $plugin = Plugin::getInstance();
 
         try {
+            // Authorization is not consumed; polling and completion share it.
+            $plugin->getVideoUploads()->completeUpload('mux', $uploadId);
             $upload = $plugin->getMux()->getUpload($uploadId);
         } catch (\Throwable $e) {
             return $this->asFailure($e->getMessage());
@@ -287,12 +280,19 @@ class MuxController extends Controller
         }
 
         $request = Craft::$app->getRequest();
-        $muxAssetId = trim((string)$request->getBodyParam('muxAssetId', ''));
         $uploadId = trim((string)$request->getBodyParam('uploadId', ''));
-        $folderId = (int)$request->getBodyParam('folderId') ?: null;
         $titleOverride = trim((string)$request->getBodyParam('title', ''));
+        $plugin = Plugin::getInstance();
 
-        if ($muxAssetId === '' && $uploadId !== '') {
+        try {
+            $context = $plugin->getVideoUploads()->completeUpload('mux', $uploadId);
+        } catch (\Throwable $e) {
+            return $this->asFailure($e->getMessage());
+        }
+        $folderId = (int)$context['folderId'];
+        $muxAssetId = '';
+
+        if ($uploadId !== '') {
             try {
                 $upload = Plugin::getInstance()->getMux()->getUpload($uploadId);
             } catch (\Throwable $e) {
@@ -319,12 +319,26 @@ class MuxController extends Controller
         // New Mux asset exists now — make it searchable without waiting out the TTL.
         Plugin::getInstance()->getMux()->invalidateLibrarySnapshot();
 
-        return $this->_respondFromMuxAssetId(
+        $response = $this->_respondFromMuxAssetId(
             $muxAssetId,
             $folderId,
             $titleOverride,
             Craft::t('polymedia', 'Mux upload complete.'),
         );
+
+        if (is_array($response->data) && !empty($response->data['assetId'])) {
+            $asset = Craft::$app->getAssets()->getAssetById((int)$response->data['assetId']);
+            if ($asset) {
+                try {
+                    $plugin->getVideoUploads()->assertSelectable($context, $asset);
+                } catch (\Throwable $e) {
+                    return $this->asFailure($e->getMessage());
+                }
+                $response->data['filename'] = $asset->getFilename();
+            }
+        }
+
+        return $response;
     }
 
     // Private Methods
@@ -412,12 +426,20 @@ class MuxController extends Controller
     ): Response {
         $plugin = Plugin::getInstance();
         $mediaItems = $plugin->getMediaItems();
+        $user = Craft::$app->getUser()->getIdentity();
+        $folder = $plugin->getManifestWriter()->resolveFolder($folderId, $user, $plugin->getSettings());
+        if (!$folder) {
+            return $this->asFailure(Craft::t('polymedia', 'Choose a writable library folder for media.'));
+        }
         $existing = $mediaItems->getByTypeAndProviderId('mux', $playbackId);
 
         if ($existing) {
             $asset = Craft::$app->getAssets()->getAssetById((int)$existing->assetId);
 
             if ($asset) {
+                if (!$user || !$asset->canView($user)) {
+                    return $this->asFailure(Craft::t('polymedia', 'You cannot access the existing media item.'));
+                }
                 // Re-import refreshes stored status/duration and the poster.
                 try {
                     if (!$mediaItems->applyMuxAssetState($muxAssetId, $muxAsset, $existing)) {
@@ -436,17 +458,6 @@ class MuxController extends Controller
                     ],
                 );
             }
-        }
-
-        $settings = $plugin->getSettings();
-        $currentUser = Craft::$app->getUser()->getIdentity();
-        $folder = $plugin->getManifestWriter()->resolveFolder($folderId, $currentUser, $settings);
-
-        if (!$folder) {
-            return $this->asFailure(Craft::t(
-                'polymedia',
-                'Choose a writable library volume for media. The sidecar volume cannot contain media manifests.',
-            ));
         }
 
         $title = $titleOverride !== ''
@@ -541,6 +552,13 @@ class MuxController extends Controller
                     'settingsUrl' => $settingsUrl,
                     'code' => 'not_configured',
                 ],
+            );
+        }
+
+        if (!$plugin->isVideoProviderEnabled('mux')) {
+            return $this->asFailure(
+                Craft::t('polymedia', 'Mux is not the selected video provider for new uploads and imports.'),
+                data: ['code' => 'inactive_provider'],
             );
         }
 

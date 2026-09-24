@@ -13,6 +13,7 @@ namespace boccdotdev\polymedia\gql\types;
 
 use boccdotdev\polymedia\gql\loaders\RelatedAssetLoader;
 use boccdotdev\polymedia\gql\PolymediaData;
+use boccdotdev\polymedia\Plugin;
 use boccdotdev\polymedia\records\MediaItemRecord;
 use boccdotdev\polymedia\services\EditorContent;
 use boccdotdev\polymedia\services\MediaItems;
@@ -169,7 +170,11 @@ class PolymediaDataType extends ObjectType
 
         return match ($resolveInfo->fieldName) {
             'type' => (string)$record->type,
-            'url' => $this->_nullableString($record->url),
+            'url' => $this->_nullableString(Plugin::getInstance()->getSourceAssets()->resolveUrl([
+                'url' => $record->url,
+                'providerId' => $record->providerId,
+                'metadata' => MediaItems::decodeMetadataJson($record->metadata),
+            ])),
             'providerId' => $this->_nullableString($record->providerId),
             'element' => $this->_nullableString($record->element),
             'title' => $this->_nullableString($record->title),

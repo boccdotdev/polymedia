@@ -9,7 +9,7 @@ const source = fs.readFileSync(
   'utf8'
 );
 
-function setup({ selected = [], disabled = [], limit = 3, eligible = true } = {}) {
+function setup({ selected = [], disabled = [], limit = 3, eligible = true, config = {} } = {}) {
   const errors = [];
   const notices = [];
   const requests = [];
@@ -31,7 +31,7 @@ function setup({ selected = [], disabled = [], limit = 3, eligible = true } = {}
   };
   vm.runInNewContext(source, {
     Craft,
-    window: {},
+    window: {CraftPolymediaConfig: config},
     $: (value) => value,
     Garnish: {
       Modal: { extend: (definition) => definition },
@@ -362,7 +362,7 @@ test('rejects malformed asset IDs rather than selecting an ID prefix', async () 
   assert.equal(s.requests.length, 0);
 });
 
-test('Mux import and upload keep their dialogs open and withhold success on refusal', async () => {
+test('video import and upload keep their dialogs open and withhold success on refusal', async () => {
   for (const kind of ['import', 'upload']) {
     const s = setup({ eligible: false });
     const request = s.Craft.sendActionRequest;
@@ -385,9 +385,9 @@ test('Mux import and upload keep their dialogs open and withhold success on refu
       _fail: assert.fail,
     };
     if (kind === 'import') {
-      s.picker.MuxBrowseModal._import.call(modal, { assetId: 'mux-id' }, button);
+      s.picker.VideoBrowseModal._import.call(modal, { assetId: 'mux-id' }, button);
     } else {
-      s.picker.MuxUploadModal._complete.call(modal, 'mux-id');
+      s.picker.VideoUploadModal._complete.call(modal, {assetId: 42});
     }
     await new Promise(setImmediate);
     assert.equal(hidden, false);
@@ -406,4 +406,84 @@ test('URL submit awaits selection and withholds success on refusal', async () =>
   await submit({ response: { data: { assetId: 42 } } });
   assert.equal(s.notices.length, 0);
   assert.equal(s.errors.length, 1);
+});
+
+test('generic menu uses selected provider, not legacy muxEnabled', () => {
+  for (const provider of ['mux', 'bunny']) {
+    const s = setup({config: {videoProvider: provider, videoEnabled: true, muxEnabled: false}});
+    const items = [];
+    const menu = {
+      data: () => ({addItem: (item) => items.push(item)}),
+      children: () => ({empty() {}}),
+    };
+    s.picker._populateAddMediaMenu(menu, s.index);
+    assert.deepEqual(items.map((item) => item.label),
+      ['From URL', 'From existing asset', 'Browse video library', 'Upload video']);
+    assert.equal(s.picker.videoAction('library'), `polymedia/${provider}/library`);
+  }
+});
+
+test('Lite menu retains URL and existing asset without provider actions', () => {
+  const s = setup();
+  const items = [];
+  s.picker._populateAddMediaMenu({
+    data: () => ({addItem: (item) => items.push(item)}),
+    children: () => ({empty() {}}),
+  }, s.index);
+  assert.deepEqual(items.map((item) => item.label), ['From URL', 'From existing asset']);
+});
+
+test('Bunny import sends videoId and retains field-selection refusal protection', async () => {
+  const s = setup({eligible: false, config: {videoProvider: 'bunny', videoEnabled: true}});
+  const request = s.Craft.sendActionRequest;
+  let imported;
+  s.Craft.sendActionRequest = (method, action, options) => {
+    if (action === 'polymedia/bunny/import') {
+      imported = options.data;
+      return Promise.resolve({data: {assetId: 42}});
+    }
+    return request(method, action, options);
+  };
+  const button = {addClass() {return this;}, removeClass() {return this;}, prop() {return this;}};
+  s.picker.VideoBrowseModal._import.call({
+    assetIndex: s.index, folderId: 4, hide: assert.fail,
+  }, {id: 'bunny-id', title: 'Video'}, button);
+  await new Promise(setImmediate);
+  assert.equal(imported.videoId, 'bunny-id');
+  assert.equal(imported.muxAssetId, undefined);
+  assert.equal(s.notices.length, 0);
+  assert.equal(s.errors.length, 1);
+});
+
+test('existing asset action is video-only, leaves source intact and checks destination selection', async () => {
+  const s = setup({eligible: false});
+  let selector;
+  let imported;
+  s.Craft.createElementSelectorModal = (_type, settings) => {selector = settings;};
+  const request = s.Craft.sendActionRequest;
+  s.Craft.sendActionRequest = (method, action, options) => {
+    if (action === 'polymedia/source-assets/import') {
+      imported = options.data;
+      return Promise.resolve({data: {assetId: 42}});
+    }
+    return request(method, action, options);
+  };
+  s.picker.openSourceAsset(s.index);
+  assert.equal(selector.criteria.kind, 'video');
+  assert.equal(selector.multiSelect, false);
+  await selector.onSelect([{id: 11}]);
+  assert.equal(imported.sourceAssetId, 11);
+  assert.equal(imported.replace, undefined);
+  assert.equal(s.notices.length, 0);
+  assert.equal(s.errors.length, 1);
+});
+
+test('explicit upload refuses a full field before provider creation', () => {
+  const s = setup({selected: [1], limit: 1});
+  s.Craft.PolymediaVideoUpload = assert.fail;
+  s.picker.VideoUploadModal.startUpload.call({
+    assetIndex: s.index, $file: [{files: [{name: 'video.mp4'}]}],
+  });
+  assert.equal(s.errors.length, 1);
+  assert.equal(s.requests.length, 0);
 });

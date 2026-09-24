@@ -86,9 +86,9 @@ class ManifestDestinationTest extends TestCase
         $this->volumes(['sidecar', 'uploads', 'videos'], $permissions);
         $this->settings->defaultVolumeUid = 'uploads';
 
-        $folder = $this->writer->resolveFolder(20, $this->user, $this->settings);
-
-        $this->assertSame(3, $folder->volumeId);
+        $this->assertNull($this->writer->resolveFolder(20, $this->user, $this->settings));
+        $this->assertNull($this->writer->resolveFolder(999, $this->user, $this->settings));
+        $this->assertSame(3, $this->writer->resolveFolder(null, $this->user, $this->settings)->volumeId);
     }
 
     private function volumes(array $uids, ?UserPermissions $permissions = null): void

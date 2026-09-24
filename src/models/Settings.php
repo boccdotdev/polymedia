@@ -136,6 +136,70 @@ class Settings extends Model
      */
     public ?string $muxWebhookSecret = null;
 
+    /**
+     * @var string Provider used for new library imports and uploads. Existing assets
+     *             retain their own provider regardless of this setting.
+     * @since 2.3.0
+     */
+    public string $videoProvider = 'mux';
+
+    /**
+     * @var string Preferred playback format; unavailable MP4s fall back to HLS.
+     * @since 2.3.0
+     */
+    public string $muxDefaultPlaybackFormat = 'hls';
+
+    /**
+     * @var string Preferred playback format for Bunny assets.
+     * @since 2.3.0
+     */
+    public string $bunnyDefaultPlaybackFormat = 'hls';
+
+    /**
+     * @var ?string Bunny Stream library ID; supports an environment reference.
+     * @since 2.3.0
+     */
+    public ?string $bunnyLibraryId = null;
+
+    /**
+     * @var ?string Environment reference for the library's write API key.
+     * @since 2.3.0
+     */
+    public ?string $bunnyApiKey = null;
+
+    /**
+     * @var ?string Bunny delivery hostname, without a scheme or path.
+     * @since 2.3.0
+     */
+    public ?string $bunnyCdnHostname = null;
+
+    /**
+     * @var ?string Environment reference for the library's read-only API key,
+     *              used to verify optional signed webhooks.
+     * @since 2.3.0
+     */
+    public ?string $bunnyWebhookKey = null;
+
+    /**
+     * @var bool Remote deletion is opt-in and only applies to hard deletion.
+     * @since 2.3.0
+     */
+    public bool $deleteBunnyAssetOnDelete = false;
+
+    /**
+     * @var bool Opt-in Pro routing of new native MP4 uploads. Never implied by
+     *           configuring a provider.
+     * @since 2.3.0
+     */
+    public bool $autoRouteVideoUploads = false;
+
+    /**
+     * @var string[] Explicit volume UID allowlist for native MP4 upload routing.
+     *               An empty list routes no native uploads.
+     * @since 2.3.0
+     */
+    public array $videoUploadVolumeUids = [];
+
     // Public Methods
     // =========================================================================
 
@@ -148,12 +212,13 @@ class Settings extends Model
 
         $rules[] = [['mediaChromeVersion', 'scriptLoaderMode', 'cdnHost'], 'required'];
         $rules[] = [['mediaChromeVersion', 'cdnHost', 'muxTokenId', 'muxTokenSecret', 'muxWebhookSecret'], 'string'];
+        $rules[] = [['bunnyLibraryId', 'bunnyApiKey', 'bunnyCdnHostname', 'bunnyWebhookKey'], 'string'];
         $rules[] = [
-            ['muxTokenId', 'muxTokenSecret', 'muxWebhookSecret'],
+            ['muxTokenId', 'muxTokenSecret', 'muxWebhookSecret', 'bunnyApiKey', 'bunnyWebhookKey'],
             'match',
             'pattern' => '/^\$[A-Za-z_][A-Za-z0-9_]*$/',
             'skipOnEmpty' => true,
-            'message' => 'Use an environment variable reference such as `$MUX_TOKEN_ID`. Literal credentials cannot be saved to project config.',
+            'message' => 'Use an environment variable reference such as `$VIDEO_API_KEY`. Literal credentials cannot be saved to project config.',
         ];
         $rules[] = [['selfHostBaseUrl'], 'string'];
         $rules[] = [['defaultVolumeUid', 'attachmentsVolumeUid', 'sidecarVolumeUid'], 'string', 'max' => 36];
@@ -167,6 +232,22 @@ class Settings extends Model
             'message' => 'The sidecar volume must be different from the default manifest volume.',
         ];
         $rules[] = [['scriptLoaderMode'], 'in', 'range' => ['cdn', 'self-host', 'none']];
+        $rules[] = [['videoProvider'], 'in', 'range' => ['mux', 'bunny']];
+        $rules[] = [['muxDefaultPlaybackFormat', 'bunnyDefaultPlaybackFormat'], 'in', 'range' => ['hls', 'mp4']];
+        $rules[] = [['videoUploadVolumeUids'], 'each', 'rule' => ['string', 'max' => 36]];
+        $rules[] = [
+            ['videoUploadVolumeUids'],
+            function(string $attribute): void {
+                if ($this->autoRouteVideoUploads && $this->videoUploadVolumeUids === []) {
+                    $this->addError($attribute, 'Select at least one volume for automatic video uploads.');
+                }
+
+                if ($this->sidecarVolumeUid !== null && in_array($this->sidecarVolumeUid, $this->videoUploadVolumeUids, true)) {
+                    $this->addError($attribute, 'The sidecar volume cannot be used for automatic video uploads.');
+                }
+            },
+            'skipOnEmpty' => false,
+        ];
         $rules[] = [['defaultProviders', 'defaultFieldAllowedProviders'], 'each', 'rule' => ['string']];
         $rules[] = [
             [
@@ -177,6 +258,8 @@ class Settings extends Model
                 'autoFetchPoster',
                 'warnOnSignedUrlInPublicVolume',
                 'deleteMuxAssetOnDelete',
+                'deleteBunnyAssetOnDelete',
+                'autoRouteVideoUploads',
             ],
             'boolean',
         ];

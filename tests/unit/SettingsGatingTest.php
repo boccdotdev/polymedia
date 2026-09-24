@@ -38,6 +38,49 @@ class SettingsGatingTest extends TestCase
         $this->assertTrue($settings->autoFetchPoster);
     }
 
+    public function testVideoDefaultsLeaveExistingUploadsAndPlaybackUnchanged(): void
+    {
+        $settings = new Settings();
+        self::assertSame('mux', $settings->videoProvider);
+        self::assertSame('hls', $settings->muxDefaultPlaybackFormat);
+        self::assertSame('hls', $settings->bunnyDefaultPlaybackFormat);
+        self::assertFalse($settings->autoRouteVideoUploads);
+        self::assertSame([], $settings->videoUploadVolumeUids);
+        self::assertFalse($settings->deleteBunnyAssetOnDelete);
+        self::assertContains('bunny', (new \boccdotdev\polymedia\services\UrlDetector())->getProviderTypes());
+    }
+
+    public function testRoutingRequiresVolumesAndBunnySecretsRequireEnvironmentReferences(): void
+    {
+        $previous = \Craft::$app;
+        new \yii\console\Application(['id' => 'settings-tests', 'basePath' => dirname(__DIR__, 2)]);
+        try {
+            $settings = new Settings([
+                'autoRouteVideoUploads' => true,
+                'bunnyApiKey' => 'literal-key',
+                'bunnyWebhookKey' => 'literal-webhook-key',
+                'videoProvider' => 'unknown',
+                'bunnyDefaultPlaybackFormat' => 'iframe',
+            ]);
+            self::assertFalse($settings->validate(['videoUploadVolumeUids', 'bunnyApiKey', 'bunnyWebhookKey', 'videoProvider', 'bunnyDefaultPlaybackFormat']));
+            foreach (['videoUploadVolumeUids', 'bunnyApiKey', 'bunnyWebhookKey', 'videoProvider', 'bunnyDefaultPlaybackFormat'] as $attribute) {
+                self::assertTrue($settings->hasErrors($attribute));
+            }
+            $settings->setAttributes([
+                'videoUploadVolumeUids' => ['video-volume'],
+                'bunnyApiKey' => '$BUNNY_API_KEY',
+                'bunnyWebhookKey' => '$BUNNY_WEBHOOK_KEY',
+                'videoProvider' => 'bunny',
+                'bunnyDefaultPlaybackFormat' => 'mp4',
+            ], false);
+            self::assertTrue($settings->validate(['videoUploadVolumeUids', 'bunnyApiKey', 'bunnyWebhookKey', 'videoProvider', 'bunnyDefaultPlaybackFormat']));
+            $settings->sidecarVolumeUid = 'video-volume';
+            self::assertFalse($settings->validate(['videoUploadVolumeUids']));
+        } finally {
+            \Craft::$app = $previous;
+        }
+    }
+
     public function testMuxCredentialsMustUseEnvironmentReferences(): void
     {
         if (!class_exists(\Yii::class, false)) {

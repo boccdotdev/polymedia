@@ -42,6 +42,7 @@ class Renderer extends Component
      */
     private const SCRIPT_MAP = [
         'hls' => 'hls-video-element@1',
+        'bunny' => 'hls-video-element@1',
         'dash' => 'dash-video-element@0',
         'shaka' => 'shaka-video-element@0',
         'mux' => '@mux/mux-video@0',
@@ -84,6 +85,12 @@ class Renderer extends Component
         $elementMap = Plugin::getInstance()->getUrlDetector()->getElementMap();
         $elementTag = ($record ? $record->element : null) ?? $elementMap[$type] ?? 'video';
 
+        $source = $this->_playbackSource($manifest, $options);
+        if ($source['url'] === '') {
+            return new Markup('', 'UTF-8');
+        }
+        $elementTag = $source['element'] ?? $elementTag;
+        $manifest['url'] = $source['url'];
         $defaults = $this->_resolveDefaults($record);
         $settings = $this->_mergeOptions($defaults, $options);
         $poster = $this->_resolvePoster($asset, $manifest, $options);
@@ -160,6 +167,12 @@ class Renderer extends Component
         $elementMap = Plugin::getInstance()->getUrlDetector()->getElementMap();
         $elementTag = ($record ? $record->element : null) ?? $elementMap[$type] ?? 'video';
 
+        $source = $this->_playbackSource($manifest, $options);
+        if ($source['url'] === '') {
+            return new Markup('', 'UTF-8');
+        }
+        $elementTag = $source['element'] ?? $elementTag;
+        $manifest['url'] = $source['url'];
         $defaults = $this->_resolveDefaults($record);
         $settings = $this->_mergeOptions($defaults, $options);
         $poster = $this->_resolvePoster($asset, $manifest, $options);
@@ -189,7 +202,13 @@ class Renderer extends Component
         }
 
         try {
-            return Plugin::getInstance()->getManifestWriter()->read($asset);
+            $plugin = Plugin::getInstance();
+            $manifest = $plugin->getManifestWriter()->read($asset);
+            if (SourceAssets::isReference($manifest)) {
+                $manifest['url'] = $plugin->getSourceAssets()->resolveUrl($manifest) ?? '';
+            }
+
+            return $manifest;
         } catch (\Throwable) {
             return [];
         }
@@ -220,6 +239,9 @@ class Renderer extends Component
      */
     public function scripts(array $opts = []): Markup
     {
+        if ($opts !== [] && array_is_list($opts)) {
+            $opts = ['providers' => $opts];
+        }
         $settings = Plugin::getInstance()->getSettings();
         $mode = $opts['mode'] ?? $settings->scriptLoaderMode;
 
@@ -271,7 +293,7 @@ class Renderer extends Component
             }
         }
 
-        return new Markup(implode("\n", $tags), 'UTF-8');
+        return new Markup(implode("\n", array_unique($tags)), 'UTF-8');
     }
 
     /**
@@ -417,6 +439,16 @@ class Renderer extends Component
         return $manifest['metadata']['thumbnail'] ?? null;
     }
 
+    private function _playbackSource(array $manifest, array $options): array
+    {
+        return PlaybackSources::resolve(
+            $manifest,
+            Plugin::getInstance()->getSettings(),
+            $options,
+            static fn(string $uid): ?string => Plugin::getInstance()->getSourceAssets()->resolveUrl($manifest),
+        );
+    }
+
     /**
      * Builds the HTML attributes for the media element.
      *
@@ -484,6 +516,10 @@ class Renderer extends Component
 
         // Template-supplied attrs on the media element (not the controller).
         foreach ($options['mediaAttrs'] ?? [] as $k => $v) {
+            if (in_array($type, ['mux', 'bunny', 'mp4'], true)
+                && in_array(strtolower((string)$k), ['src', 'playback-id', 'type'], true)) {
+                continue;
+            }
             $attrs[$k] = $v;
         }
 
