@@ -526,6 +526,17 @@ Assets expose a `polymedia` field on the GraphQL Asset interface — `null` for 
 - [ ] Live streaming UI hints
 - [ ] Console command for self-host script bundling
 
+### Video hosting and asset workflows
+
+Implementation is on the [`2.2` development branch](https://github.com/boccdotdev/polymedia/tree/2.2), pending live Craft and provider testing. These features are not part of the current release.
+
+- [ ] Bunny Stream integration for Pro: library browsing and search, import, resumable direct uploads, poster and metadata synchronization, optional signed webhooks and console sync.
+- [ ] One developer-selected hosting provider, Mux or Bunny, with provider-neutral **Browse video library** and **Upload video** actions for authors. Existing assets keep their original provider.
+- [ ] Per-provider HLS or MP4 playback defaults, with HLS selected initially, template overrides and HLS fallback when an MP4 is unavailable. Playback continues to use Media Chrome.
+- [ ] Pro-only automatic routing of new native MP4 uploads to the selected provider, creating `.pmedia` assets instead of storing the video in the native volume. Explicitly opt-in, off by default, and limited to selected volumes with supported uploaders.
+- [ ] Lite **From existing asset** action to reference Craft-hosted videos by UID, retaining the original file and following source moves or renames.
+- [ ] Optional Bunny remote deletion on permanent Craft deletion, disabled by default. Trashing an asset never deletes its remote video.
+
 ## Credits
 
 Built on [Media Chrome](https://www.media-chrome.org/) and the [media-elements](https://github.com/muxinc/media-elements) monorepo by Mux.
