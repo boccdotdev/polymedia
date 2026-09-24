@@ -97,14 +97,8 @@ class PosterFetcher extends Component
             return null;
         }
 
-        $folder = Plugin::getInstance()->getSidecarStorage()->getItemFolder($record);
-
-        if (!$folder) {
-            $this->_persistThumbnailUrl($record, $remoteUrl);
-
-            return null;
-        }
-
+        // HTTP stays outside the item lock. No storage is created until the
+        // item and its poster have been re-read after the download.
         $download = $this->downloadToTemp($remoteUrl);
 
         if ($download === null) {
@@ -112,32 +106,74 @@ class PosterFetcher extends Component
         }
 
         try {
-            $poster = $this->_createPosterAsset(
-                $download['path'],
-                $download['extension'],
-                $folder,
-                (int)$folder->volumeId,
-                (string)$record->title,
-            );
+            $result = Plugin::getInstance()->getMediaItems()->withItemLock($record, function() use ($record, $related, $existing, $force, $download): array {
+                $fresh = Plugin::getInstance()->getMediaItems()->getById((int)$record->id);
+
+                if (!$fresh || !Craft::$app->getAssets()->getAssetById((int)$fresh->assetId)) {
+                    return ['poster' => null, 'persist' => false];
+                }
+
+                $current = $related->getPoster((int)$fresh->id);
+
+                // Force replaces only the poster observed at the start. An
+                // editor or another fetch that changed it while HTTP ran wins.
+                if ($this->shouldSkipAutoFetch($current, $force)
+                    || ($current?->id !== $existing?->id)
+                ) {
+                    return ['poster' => $current, 'persist' => false];
+                }
+
+                $folder = Plugin::getInstance()->getSidecarStorage()->getItemFolder($fresh);
+
+                if (!$folder) {
+                    return ['poster' => null, 'persist' => true];
+                }
+
+                $poster = $this->_createPosterAsset(
+                    $download['path'],
+                    $download['extension'],
+                    $folder,
+                    (int)$folder->volumeId,
+                    (string)$fresh->title,
+                );
+
+                if (!$poster) {
+                    return ['poster' => null, 'persist' => false];
+                }
+
+                try {
+                    $related->attach(
+                        itemId: (int)$fresh->id,
+                        assetId: (int)$poster->id,
+                        role: 'poster',
+                    );
+                } catch (\Throwable $e) {
+                    // Only this newly-created, unattached candidate is ours
+                    // to discard. Never delete the previous selected poster.
+                    if (!$related->isAssetRelated((int)$poster->id)) {
+                        Craft::$app->getElements()->deleteElement($poster, true);
+                    }
+                    throw $e;
+                }
+
+                return ['poster' => $poster, 'persist' => true];
+            });
+
+            if ($result === null) {
+                throw new \RuntimeException("Could not lock media item #{$record->id} to attach its poster.");
+            }
         } finally {
             if (is_file($download['path'])) {
                 @unlink($download['path']);
             }
         }
 
-        if (!$poster) {
-            return null;
+        // patchMetadata takes the same non-reentrant item lock.
+        if ($result['persist']) {
+            $this->_persistThumbnailUrl($record, $remoteUrl);
         }
 
-        $related->attach(
-            itemId: (int)$record->id,
-            assetId: (int)$poster->id,
-            role: 'poster',
-        );
-
-        $this->_persistThumbnailUrl($record, $remoteUrl);
-
-        return $poster;
+        return $result['poster'];
     }
 
     /**
@@ -334,7 +370,7 @@ class PosterFetcher extends Component
      * @param string $title
      * @return ?Asset
      */
-    private function _createPosterAsset(
+    protected function _createPosterAsset(
         string $tempPath,
         string $extension,
         VolumeFolder $folder,

@@ -74,9 +74,14 @@ class FetchMuxPoster extends BaseJob
         $this->setProgress($queue, 0.2);
 
         $url = $plugin->getMux()->firstFrameThumbnailUrl($this->playbackId);
-        $poster = $plugin->getPosterFetcher()->fetchForItem($record, $url);
+        try {
+            $poster = $plugin->getPosterFetcher()->fetchForItem($record, $url);
+        } catch (\Throwable $e) {
+            Craft::warning("FetchMuxPoster failed for item #{$this->itemId}: {$e->getMessage()}", __METHOD__);
+            $poster = null;
+        }
 
-        if ($poster) {
+        if ($poster || !$plugin->getMediaItems()->getById($this->itemId)) {
             $this->setProgress($queue, 1.0);
 
             return;

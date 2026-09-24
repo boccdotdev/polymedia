@@ -481,14 +481,29 @@ class Plugin extends BasePlugin
      */
     private function _registerAssetDeleteHandler(): void
     {
+        $deleting = [];
+
         Event::on(
             Asset::class,
-            Asset::EVENT_AFTER_DELETE,
-            function(Event $e) {
-                /** @var Asset $asset */
+            Asset::EVENT_BEFORE_DELETE,
+            function(Event $e) use (&$deleting) {
                 $asset = $e->sender;
 
-                if ($asset->kind !== 'polymedia') {
+                if ($asset->kind === 'polymedia' && $asset->hardDelete) {
+                    // The FK cascade removes this row before afterDelete.
+                    $deleting[(int)$asset->id] = $this->getMediaItems()->getByAssetId((int)$asset->id);
+                }
+            },
+        );
+
+        Event::on(
+            \craft\services\Elements::class,
+            \craft\services\Elements::EVENT_AFTER_DELETE_ELEMENT,
+            function(\craft\events\ElementEvent $e) use (&$deleting) {
+                /** @var Asset $asset */
+                $asset = $e->element;
+
+                if (!$asset instanceof Asset || $asset->kind !== 'polymedia') {
                     return;
                 }
 
@@ -498,10 +513,26 @@ class Plugin extends BasePlugin
                     return;
                 }
 
-                $record = $this->getMediaItems()->getByAssetId((int)$asset->id);
+                $record = $deleting[(int)$asset->id] ?? null;
+                unset($deleting[(int)$asset->id]);
                 $this->_maybeDeleteMuxAsset($record);
-                $this->getSidecarStorage()->deleteForAsset($asset);
-                $this->getMediaItems()->deleteByAssetId((int)$asset->id);
+
+                $cleanup = function() use ($asset): bool {
+                    $this->getSidecarStorage()->deleteForAsset($asset);
+                    $this->getMediaItems()->deleteByAssetId((int)$asset->id);
+
+                    return true;
+                };
+
+                // Run after Craft's delete transaction, not Asset::afterDelete:
+                // a poster writer may hold the mutex while waiting on the DB.
+                if ($record) {
+                    if ($this->getMediaItems()->withItemLock($record, $cleanup) === null) {
+                        throw new \RuntimeException("Could not lock deleted media item #{$record->id} for sidecar cleanup.");
+                    }
+                } else {
+                    $cleanup();
+                }
             },
         );
     }

@@ -437,6 +437,7 @@ class MediaItems extends Component
      *                                 id, then by Mux asset id
      * @return ?MediaItemRecord the updated record, or `null` when no media
      *                          item matches this Mux asset
+     * @throws \RuntimeException when the item lock or persistence fails
      *
      * @author boccdotdev
      * @since 2.2.0
@@ -452,12 +453,11 @@ class MediaItems extends Component
             return null;
         }
 
-        $this->withItemLock($record, function() use ($record, $muxAssetId, $state): void {
-            /** @var ?MediaItemRecord $fresh */
-            $fresh = MediaItemRecord::findOne(['id' => $record->id]);
+        $applied = $this->withItemLock($record, function() use ($record, $muxAssetId, $state): bool {
+            $fresh = $this->getById((int)$record->id);
 
             if (!$fresh) {
-                return;
+                return false;
             }
 
             $merge = self::mergeMuxAssetState(
@@ -468,17 +468,32 @@ class MediaItems extends Component
             );
 
             if (!$merge['changed']) {
-                return;
+                $record->metadata = $fresh->metadata;
+                $record->duration = $fresh->duration;
+
+                return true;
             }
 
             $fresh->metadata = Json::encode($merge['metadata']);
             $fresh->duration = $merge['duration'];
 
-            if ($this->save($fresh)) {
-                $record->metadata = $fresh->metadata;
-                $record->duration = $fresh->duration;
+            if (!$this->save($fresh)) {
+                throw new \RuntimeException("Could not persist Mux state for media item #{$record->id}.");
             }
+
+            $record->metadata = $fresh->metadata;
+            $record->duration = $fresh->duration;
+
+            return true;
         });
+
+        if ($applied === null) {
+            throw new \RuntimeException("Could not lock media item #{$record->id} for Mux state.");
+        }
+
+        if (!$applied) {
+            return null;
+        }
 
         // Outside the lock: poster ensure is internally idempotent (no-ops
         // when a poster is attached, probes the CDN, queues retries while the

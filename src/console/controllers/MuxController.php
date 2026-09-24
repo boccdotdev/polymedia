@@ -113,13 +113,15 @@ class MuxController extends Controller
 
             try {
                 $state = $mux->getAsset((string)$muxAssetId);
+                if (!$mediaItems->applyMuxAssetState((string)$muxAssetId, $state, $record)) {
+                    throw new \RuntimeException('Media item disappeared during sync.');
+                }
             } catch (\Throwable $e) {
                 $failed++;
                 $this->stderr("✗ {$label}: {$e->getMessage()}\n", Console::FG_RED);
                 continue;
             }
 
-            $mediaItems->applyMuxAssetState((string)$muxAssetId, $state, $record);
             $synced++;
 
             $status = isset($state['status']) ? (string)$state['status'] : 'unknown';

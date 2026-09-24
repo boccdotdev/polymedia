@@ -228,13 +228,6 @@ class RelatedAssets extends Component
 
         $this->_validateAssetForRole($asset, $role);
 
-        if ($role === 'poster' || $role === 'transcript') {
-            RelatedAssetRecord::deleteAll([
-                'itemId' => $itemId,
-                'role' => $role,
-            ]);
-        }
-
         $record = new RelatedAssetRecord();
         $record->itemId = $itemId;
         $record->assetId = $assetId;
@@ -243,9 +236,29 @@ class RelatedAssets extends Component
         $record->srclang = $srclang;
         $record->label = $label;
         $record->sortOrder = $sortOrder;
-        $record->save();
+
+        Craft::$app->getDb()->transaction(function() use ($record, $role, $itemId): void {
+            if ($role === 'poster' || $role === 'transcript') {
+                RelatedAssetRecord::deleteAll([
+                    'itemId' => $itemId,
+                    'role' => $role,
+                ]);
+            }
+
+            if (!$record->save()) {
+                throw new \RuntimeException('Could not save related asset: ' . implode(', ', $record->getFirstErrors()));
+            }
+        });
 
         return $record;
+    }
+
+    /**
+     * Checks all item relationships before discarding a generated candidate.
+     */
+    public function isAssetRelated(int $assetId): bool
+    {
+        return RelatedAssetRecord::find()->where(['assetId' => $assetId])->exists();
     }
 
     /**
@@ -337,6 +350,24 @@ class RelatedAssets extends Component
      * @since 1.3.0
      */
     public function savePoster(MediaItemRecord $record, mixed $posterIds): void
+    {
+        $items = Plugin::getInstance()->getMediaItems();
+        $saved = $items->withItemLock($record, function() use ($items, $record, $posterIds): bool {
+            $fresh = $items->getById((int)$record->id);
+
+            if ($fresh) {
+                $this->_savePoster($fresh, $posterIds);
+            }
+
+            return true;
+        });
+
+        if ($saved === null) {
+            throw new \RuntimeException("Could not lock media item #{$record->id} to save its poster.");
+        }
+    }
+
+    private function _savePoster(MediaItemRecord $record, mixed $posterIds): void
     {
         if (is_array($posterIds)) {
             $posterAssetId = (int)($posterIds[0] ?? 0) ?: null;

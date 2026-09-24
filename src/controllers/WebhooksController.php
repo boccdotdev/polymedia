@@ -115,7 +115,14 @@ class WebhooksController extends Controller
         // The library changed (or an asset's state did) — keep browse/search fresh.
         $mux->invalidateLibrarySnapshot();
 
-        $record = $plugin->getMediaItems()->applyMuxAssetState($state['assetId'], $state);
+        try {
+            $record = $plugin->getMediaItems()->applyMuxAssetState($state['assetId'], $state);
+        } catch (\Throwable $e) {
+            Craft::error("Mux webhook could not be applied: {$e->getMessage()}", __METHOD__);
+            Craft::$app->getResponse()->setStatusCode(503);
+
+            return $this->asJson(['ok' => false, 'handled' => false]);
+        }
 
         if ($record) {
             Craft::info(

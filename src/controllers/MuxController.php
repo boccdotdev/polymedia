@@ -419,7 +419,13 @@ class MuxController extends Controller
 
             if ($asset) {
                 // Re-import refreshes stored status/duration and the poster.
-                $mediaItems->applyMuxAssetState($muxAssetId, $muxAsset, $existing);
+                try {
+                    if (!$mediaItems->applyMuxAssetState($muxAssetId, $muxAsset, $existing)) {
+                        return $this->asFailure('Media item disappeared during import. Please retry.');
+                    }
+                } catch (\Throwable $e) {
+                    return $this->asFailure($e->getMessage());
+                }
 
                 return $this->asSuccess(
                     Craft::t('polymedia', 'Already in Craft — using existing media item.'),
@@ -476,10 +482,18 @@ class MuxController extends Controller
 
         $record = $mediaItems->getByAssetId((int)$asset->id);
 
-        if ($record) {
-            // Duration, status metadata, and the poster job all flow through
-            // the shared, lock-guarded state pipeline.
-            $mediaItems->applyMuxAssetState($muxAssetId, $muxAsset, $record);
+        if (!$record) {
+            return $this->asFailure('Media item disappeared during import. Please retry.');
+        }
+
+        // Duration, status metadata, and the poster job all flow through
+        // the shared, lock-guarded state pipeline.
+        try {
+            if (!$mediaItems->applyMuxAssetState($muxAssetId, $muxAsset, $record)) {
+                return $this->asFailure('Media item disappeared during import. Please retry.');
+            }
+        } catch (\Throwable $e) {
+            return $this->asFailure($e->getMessage());
         }
 
         return $this->asSuccess(
