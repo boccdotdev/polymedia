@@ -167,9 +167,9 @@ php craft polymedia/setup/sidecar-volume \
   --url='$POLYMEDIA_SIDECAR_URL'
 ```
 
-Keep a local sidecar path outside every other Craft filesystem's base path, otherwise another volume may index the same files. The directory must also persist across deployments.
+Keep the sidecar filesystem's base path or object prefix outside every other Craft filesystem's base path or prefix. Nesting it under an existing Uploads filesystem can cause both volumes to index the same files. Local directories must also persist across deployments.
 
-To use S3, Google Cloud Storage, or another remote filesystem, create a dedicated Craft filesystem and volume, then select it under **Settings → Plugins → Polymedia → Sidecar Volume**. You can also change the filesystem used by the auto-created volume without changing its Polymedia setting. After selecting a different volume, run `php craft polymedia/migrate/sidecars` to move existing managed files into it.
+To use S3, Google Cloud Storage, or another remote filesystem, create a dedicated Craft filesystem and volume with a non-overlapping prefix, then select it under **Settings → Plugins → Polymedia → Sidecar Volume**. You can also change the filesystem used by the auto-created volume without changing its Polymedia setting. After selecting a different volume, run `php craft polymedia/migrate/sidecars` to move existing managed files into it.
 
 Editors who use the inline poster or WebVTT upload controls need permission to save assets in the sidecar volume. Polymedia still removes the volume from their Assets index.
 
