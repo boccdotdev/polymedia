@@ -50,7 +50,7 @@ Open the **Add media** menu and choose **From URL**, paste any supported URL, an
 - **Assets index** — sits beside **Upload files**. The manifest lands in the volume/folder you're currently browsing, exactly like an uploaded file.
 - **Field selection modals** — when picking media for a Polymedia or Assets field. The manifest lands in the field's upload location.
 
-No volume picker — the target follows your current location, falling back to the configured default volume (then the first volume you can write to) if none can be resolved.
+No volume picker — the target follows your current location, falling back to the configured default volume (then the first ordinary volume you can write to) if none can be resolved. The sidecar volume is never a manifest destination. If no writable library volume is available, creation stops with an error.
 
 For providers that can't be auto-detected (Shaka, Video.js, PeerTube), use the "Force Type" dropdown.
 
@@ -93,6 +93,8 @@ A Mux item's processing status (`preparing` / `ready` / `errored`) and duration 
 3. Mux generates a **signing secret** for the webhook. Put it in your `.env` (e.g. `MUX_WEBHOOK_SECRET=…`) and set **Mux Webhook Signing Secret** to `$MUX_WEBHOOK_SECRET`.
 
 Every delivery is verified against the signing secret (HMAC, with a replay-window check); the endpoint is disabled entirely while no secret is set. Deliveries for videos that aren't in Craft are acknowledged and ignored. `video.asset.deleted` only marks the item's stored status — it never deletes the Craft asset.
+
+Lock timeouts or failed state writes return HTTP `503` so Mux can retry rather than treating the delivery as handled. Repeated deliveries with unchanged state are safe. Console sync reports failed items and exits non-zero so scheduled runs can detect and retry failures.
 
 Each Mux **environment** has its own webhooks and secrets, so configure one per environment and keep the secret in that environment's `.env`.
 
@@ -185,6 +187,8 @@ php craft polymedia/migrate/sidecars
 The command moves each legacy `.pmedia` into its parent folder, but leaves legacy posters and tracks in place. Older versions did not record whether Polymedia created an attachment or an editor selected it from the library. Matching a title or folder name is not proof of ownership, so these files are reported as `kept` for manual review. Their existing relations continue to work.
 
 When changing sidecar volumes, the command can move files already in that item's explicit asset-UID folder. It leaves files referenced by another Polymedia item or a native Craft relation field in place, including references from trashed items.
+
+Keep the previous volume and filesystem available while any retained files still use them.
 
 The dry run reports `planned` moves without creating folders or changing files. Execution reports `moved`, `kept`, and `failed` results with asset IDs and destinations. Failed moves are not counted as successful, and any failure produces a non-zero exit code. Correct the reported problem and rerun the command; files already moved to the selected sidecar volume are skipped.
 
