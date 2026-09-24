@@ -46,35 +46,16 @@ class SidecarMigration
             }
 
             $seen[$assetId] = true;
-            $asset = $this->assets->getAssetById($assetId);
-            $folder = $asset ? $this->assets->getFolderById((int)$asset->folderId) : null;
 
-            if (!$asset || !$folder) {
-                $results[] = $this->result($assetId, 'sidecar', 'kept', 'Asset or folder is unavailable; relation left unchanged.');
-                continue;
+            try {
+                $result = $this->migrateSidecar($assetId, $record, $dryRun);
+
+                if ($result) {
+                    $results[] = $result;
+                }
+            } catch (\Throwable $e) {
+                $results[] = $this->result($assetId, 'sidecar', 'failed', $e->getMessage());
             }
-
-            if (!$this->storage->isItemFolder($folder, (string)$record->assetUid)) {
-                $results[] = $this->result($assetId, 'sidecar', 'kept', 'Legacy or library asset ownership is uncertain; left in place for manual review.');
-                continue;
-            }
-
-            if ((int)$folder->volumeId === (int)$this->storage->getVolume()?->id) {
-                continue;
-            }
-
-            if ($this->storage->isSharedAsset($assetId, (int)$record->id)) {
-                $results[] = $this->result($assetId, 'sidecar', 'kept', 'Referenced by another item or Craft field; left in place.');
-                continue;
-            }
-
-            $results[] = $this->move(
-                $asset,
-                'sidecar',
-                'configured sidecar volume / ' . $this->storage->itemFolderPath((string)$record->assetUid),
-                $dryRun,
-                fn(): bool => $this->storage->moveIntoItem($asset, $record),
-            );
         }
 
         // Keep the manifest in place after a partial failure so a retry sees the
@@ -85,27 +66,64 @@ class SidecarMigration
             return $results;
         }
 
-        $folder = $this->assets->getFolderById((int)$manifest->folderId);
+        try {
+            $folder = $this->assets->getFolderById((int)$manifest->folderId);
 
-        if ($folder && $this->isLegacyManifestFolder($folder, $manifest, $record)) {
-            $parent = $this->assets->getFolderById((int)$folder->parentId);
+            if ($folder && $this->isLegacyManifestFolder($folder, $manifest, $record)) {
+                $parent = $this->assets->getFolderById((int)$folder->parentId);
 
-            if ($parent) {
-                $results[] = $this->move(
-                    $manifest,
-                    'manifest',
-                    "folder #{$parent->id} / {$parent->path}",
-                    $dryRun,
-                    fn(): bool => $this->assets->moveAsset(
+                if ($parent) {
+                    $results[] = $this->move(
                         $manifest,
-                        $parent,
-                        $this->assets->getNameReplacementInFolder($manifest->getFilename(), (int)$parent->id),
-                    ),
-                );
+                        'manifest',
+                        "folder #{$parent->id} / {$parent->path}",
+                        $dryRun,
+                        fn(): bool => $this->assets->moveAsset(
+                            $manifest,
+                            $parent,
+                            $this->assets->getNameReplacementInFolder($manifest->getFilename(), (int)$parent->id),
+                        ),
+                    );
+                }
             }
+        } catch (\Throwable $e) {
+            $results[] = $this->result((int)$manifest->id, 'manifest', 'failed', $e->getMessage());
         }
 
         return $results;
+    }
+
+    /**
+     * @return array{assetId: int, kind: string, status: string, message: string}|null
+     */
+    private function migrateSidecar(int $assetId, MediaItemRecord $record, bool $dryRun): ?array
+    {
+        $asset = $this->assets->getAssetById($assetId);
+        $folder = $asset ? $this->assets->getFolderById((int)$asset->folderId) : null;
+
+        if (!$asset || !$folder) {
+            return $this->result($assetId, 'sidecar', 'kept', 'Asset or folder is unavailable; relation left unchanged.');
+        }
+
+        if (!$this->storage->isItemFolder($folder, (string)$record->assetUid)) {
+            return $this->result($assetId, 'sidecar', 'kept', 'Legacy or library asset ownership is uncertain; left in place for manual review.');
+        }
+
+        if ((int)$folder->volumeId === (int)$this->storage->getVolume()?->id) {
+            return null;
+        }
+
+        if ($this->storage->isSharedAsset($assetId, (int)$record->id)) {
+            return $this->result($assetId, 'sidecar', 'kept', 'Referenced by another item or Craft field; left in place.');
+        }
+
+        return $this->move(
+            $asset,
+            'sidecar',
+            'configured sidecar volume / ' . $this->storage->itemFolderPath((string)$record->assetUid),
+            $dryRun,
+            fn(): bool => $this->storage->moveIntoItem($asset, $record),
+        );
     }
 
     /**

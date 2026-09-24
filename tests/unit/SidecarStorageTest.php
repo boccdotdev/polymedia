@@ -59,8 +59,6 @@ class SidecarStorageTest extends TestCase
             $this->markTestSkipped('SQLite is required for the isolated relation-query test.');
         }
 
-        require_once dirname((new \ReflectionClass(\yii\BaseYii::class))->getFileName()) . '/Yii.php';
-        require_once dirname((new \ReflectionClass(VolumeFolder::class))->getFileName(), 2) . '/Craft.php';
         $previousApp = Craft::$app;
         $app = new \yii\console\Application([
             'id' => 'sidecar-relation-tests',

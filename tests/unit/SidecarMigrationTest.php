@@ -30,8 +30,6 @@ class SidecarMigrationTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        require_once dirname((new \ReflectionClass(\yii\BaseYii::class))->getFileName()) . '/Yii.php';
-        require_once dirname((new \ReflectionClass(Asset::class))->getFileName(), 2) . '/Craft.php';
         $this->previousApp = Craft::$app;
         new \yii\console\Application([
             'id' => 'sidecar-migration-tests',
@@ -158,6 +156,18 @@ class SidecarMigrationTest extends TestCase
         $this->assertStringContainsString('Storage unavailable', $results[0]['message']);
     }
 
+    public function testLaterLookupFailureDoesNotLoseEarlierSuccessfulMove(): void
+    {
+        [$migration, $manifest, $record, , $storage] = $this->managedFixture(laterFailure: true);
+        $storage->method('moveIntoItem')->willReturn(true);
+
+        $results = $migration->migrateItem($manifest, $record, false);
+
+        $this->assertSame(['moved', 'failed', 'kept'], array_column($results, 'status'));
+        $this->assertSame([2, 3, 1], array_column($results, 'assetId'));
+        $this->assertStringContainsString('Lookup unavailable', $results[1]['message']);
+    }
+
     public function testFailedManifestMoveIsReportedInsteadOfCountedAsMoved(): void
     {
         $manifest = $this->asset(1, 10, 'hero.pmedia');
@@ -184,7 +194,7 @@ class SidecarMigrationTest extends TestCase
         $this->assertSame(1, $results[0]['assetId']);
     }
 
-    private function managedFixture(?string $path = null, bool $shared = false): array
+    private function managedFixture(?string $path = null, bool $shared = false, bool $laterFailure = false): array
     {
         $record = new MigrationItem();
         $manifest = $this->asset(1, 10, 'hero.pmedia');
@@ -198,7 +208,13 @@ class SidecarMigrationTest extends TestCase
         ]);
 
         $assets = $this->createMock(Assets::class);
-        $assets->method('getAssetById')->with(2)->willReturn($poster);
+        $assets->method('getAssetById')->willReturnCallback(static function(int $id) use ($poster): Asset {
+            if ($id !== 2) {
+                throw new \RuntimeException('Lookup unavailable');
+            }
+
+            return $poster;
+        });
         $assets->method('getFolderById')->willReturnMap([[20, $folder], [10, null], [100, null]]);
 
         $storage = $this->getMockBuilder(SidecarStorage::class)
@@ -210,7 +226,7 @@ class SidecarMigrationTest extends TestCase
         $related = $this->createMock(RelatedAssets::class);
         $related->method('getForItem')->with(1)->willReturn([
             new MigrationRelation(['assetId' => 2]),
-            new MigrationRelation(['assetId' => 2]),
+            new MigrationRelation(['assetId' => $laterFailure ? 3 : 2]),
         ]);
 
         return [new SidecarMigration($assets, $storage, $related), $manifest, $record, $assets, $storage, $poster, $folder];
