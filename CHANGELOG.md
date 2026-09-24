@@ -2,6 +2,14 @@
 
 ## 2.2.0 - 2026-09-24
 
+> [!WARNING]
+> Existing installations need a dedicated sidecar volume before Polymedia can create new managed posters or accept inline poster and WebVTT uploads. Run `php craft polymedia/setup/sidecar-volume`, or select a dedicated volume in Polymedia settings. Its storage path or bucket prefix must not overlap another volume. Existing media and attachments continue to work.
+>
+> See the [sidecar setup and migration guide](https://github.com/boccdotdev/polymedia#sidecar-volume).
+
+> [!WARNING]
+> Mux token settings now require environment-variable references. If your settings contain literal credentials, move those values into environment variables and use references such as `$MUX_TOKEN_ID` and `$MUX_TOKEN_SECRET`. Literal credentials will be rejected when saving plugin settings.
+
 ### Added
 - A dedicated sidecar volume for posters and WebVTT files created by Polymedia. New installations create a public local volume automatically. S3, Google Cloud Storage and other Craft filesystems are also supported.
 - `polymedia/setup/sidecar-volume` creates the default local sidecar volume on existing installations.
@@ -28,9 +36,8 @@
 - Settings saves and automatic sidecar setup preserve environment-variable references.
 
 ### Upgrade notes
-- Configure a dedicated sidecar volume before using new poster or VTT uploads. Existing installations can run `php craft polymedia/setup/sidecar-volume` or select a separate volume in plugin settings. Keep its filesystem path or object prefix outside every other volume's indexed path.
 - Preview legacy migration with `php craft polymedia/migrate/sidecars --dry-run`. Legacy posters and tracks remain linked in their original locations because older versions did not record ownership. Do not remove folders that still contain retained files.
-- Supply Mux credentials through environment variables and select their references in settings. Webhooks remain optional; upload polling and console sync still work without them.
+- Webhooks remain optional. Upload polling and console sync still work without them.
 
 ## 2.1.3 - 2026-07-17
 
