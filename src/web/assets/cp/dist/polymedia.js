@@ -5,6 +5,17 @@
     return;
   }
 
+  // Craft's modal callback does not return the field's async selection promise.
+  // Keep the owning input so we can check its live state and await that promise.
+  if (Craft.BaseElementSelectInput) {
+    var getModalSettings = Craft.BaseElementSelectInput.prototype.getModalSettings;
+    Craft.BaseElementSelectInput.prototype.getModalSettings = function () {
+      var settings = getModalSettings.apply(this, arguments);
+      settings.polymediaInput = this;
+      return settings;
+    };
+  }
+
   // Asset select input that pins inline uploads to a fixed folder, so a poster
   // image or caption file uploaded straight from the field lands in the same
   // place as the .pmedia file instead of erroring for want of a target folder
@@ -186,16 +197,14 @@
         { params: params }
       );
 
-      slideout.on('submit', function (ev) {
-        Craft.cp.displayNotice(Craft.t('polymedia', 'Media item created.'));
-
+      slideout.on('submit', async function (ev) {
         var assetId =
           ev && ev.response && ev.response.data
             ? ev.response.data.assetId
             : null;
 
-        if (!Craft.Polymedia.selectIntoField(assetIndex, assetId)) {
-          Craft.Polymedia._refreshIndex(assetIndex);
+        if (await Craft.Polymedia.finishSelection(assetIndex, assetId)) {
+          Craft.cp.displayNotice(Craft.t('polymedia', 'Media item created.'));
         }
       });
     },
@@ -255,34 +264,227 @@
     /**
      * Selects an asset into the field whose picker spawned this index.
      *
-     * Passes a minimal element reference through Craft's normal selector
-     * callback. The field input renders the selected asset by id, so this also
-     * works when the asset isn't visible in the selector's current source.
+     * Uses the field's native insertion after checking the picker restrictions.
+     * Eligibility is independent of the listing's search, page and folder.
      *
      * @param {?Craft.AssetIndex} assetIndex
      * @param {?number} assetId the Craft asset id to select
-     * @returns {boolean} whether field selection was attempted
+     * @returns {Promise<boolean>} whether the asset was selected
      */
-    selectIntoField: function (assetIndex, assetId) {
-      if (!assetId || !Craft.Polymedia.isFieldPicker(assetIndex)) {
+    selectIntoField: async function (assetIndex, assetId) {
+      if (!Craft.Polymedia.isFieldPicker(assetIndex)) {
         return false;
       }
 
       var selectorModal = assetIndex.settings.modal;
-      var id = parseInt(assetId, 10);
+      var input = selectorModal.settings.polymediaInput;
+      var id = Number(assetId);
+      var siteId = assetIndex.siteId || Craft.siteId;
 
-      if (!id) {
+      if (
+        !Number.isSafeInteger(id) ||
+        id <= 0 ||
+        !input ||
+        input._polymediaSelecting
+      ) {
         return false;
       }
 
-      selectorModal.onSelect([
-        {
-          id: id,
-          siteId: assetIndex.siteId || Craft.siteId,
-        },
-      ]);
+      var canSelect = function () {
+        var disabledIds = input.getDisabledElementIds().concat(
+          assetIndex.settings.disabledElementIds || [],
+          selectorModal.settings.disabledElementIds || []
+        );
+        var selectedIds = input.getSelectedElementIds();
+        var replacementHasSlot = input._$replaceElement &&
+          selectedIds.some(function (selectedId) {
+            return Number(selectedId) === Number(input._$replaceElement.data('id'));
+          }) &&
+          (!input.settings.limit || selectedIds.length <= input.settings.limit);
+        return (
+          input.modal === selectorModal &&
+          (assetIndex.siteId || Craft.siteId) === siteId &&
+          !disabledIds.some(function (disabledId) {
+            return Number(disabledId) === id;
+          }) &&
+          (input._$replaceElement ? replacementHasSlot : input.canAddMoreElements())
+        );
+      };
 
-      return true;
+      if (!canSelect()) {
+        return false;
+      }
+
+      input._polymediaSelecting = true;
+      try {
+        // These are the sources Craft actually exposed to this field, not the
+        // current listing folder. Their data criteria also carry volume limits.
+        var sources = assetIndex.$sources;
+        var eligible = false;
+        for (var i = 0; sources && i < sources.length; i++) {
+          var $source = sources.eq(i);
+          var sourceSites = $source.data('sites');
+          if (
+            $source.data('disabled') ||
+            (sourceSites &&
+              String(sourceSites).split(',').indexOf(String(siteId)) === -1)
+          ) {
+            continue;
+          }
+          var criteria = Object.assign(
+            { status: null, drafts: false, siteId: siteId },
+            $source.data('criteria') || {},
+            { includeSubfolders: true },
+            assetIndex.settings.criteria || {}
+          );
+          var response = await Craft.sendActionRequest('POST', 'polymedia/picker/check', {
+            data: {
+              assetId: id,
+              context: 'modal',
+              elementType: assetIndex.elementType,
+              source: $source.data('key'),
+              baseCriteria: criteria,
+              condition: assetIndex.settings.condition,
+              referenceElementId: assetIndex.settings.referenceElementId,
+              referenceElementOwnerId: assetIndex.settings.referenceElementOwnerId,
+              referenceElementSiteId: assetIndex.settings.referenceElementSiteId,
+            },
+          });
+          if (response.data.selectable === true) {
+            eligible = true;
+            break;
+          }
+        }
+
+        // State may have changed while the eligibility request was in flight.
+        if (!eligible || !canSelect()) {
+          return false;
+        }
+
+        try {
+          if (input._$replaceElement) {
+            await Craft.Polymedia._replaceIntoField(
+              input, selectorModal, id, siteId, canSelect
+            );
+          } else {
+            await input.onModalSelect([{ id: id, siteId: siteId }]);
+          }
+        } catch (error) {
+          // Craft disables the picker before requesting the field HTML, but
+          // does not restore it if that request rejects.
+          if (input.modal === selectorModal) {
+            selectorModal.enable();
+            selectorModal.enableCancelBtn();
+            selectorModal.enableSelectBtn();
+            selectorModal.hideFooterSpinner();
+          }
+          if (input.elementEditor) {
+            input.elementEditor.resume();
+          }
+          // Craft inserts before appending returned head/body HTML. A failure
+          // in that later work does not undo a completed field selection.
+          if (input.getSelectedElementIds().some(function (selectedId) {
+            return Number(selectedId) === id;
+          })) {
+            if (input.modal === selectorModal) {
+              selectorModal.hide();
+            }
+            return true;
+          }
+          throw error;
+        }
+        return input.getSelectedElementIds().some(function (selectedId) {
+          return Number(selectedId) === id;
+        });
+      } finally {
+        input._polymediaSelecting = false;
+      }
+    },
+
+    // Native onModalSelect removes the replacement before requesting its new
+    // HTML. Prepare everything first so a failed request cannot erase a value.
+    _replaceIntoField: async function (input, modal, id, siteId, canSelect) {
+      var $oldElement = input._$replaceElement;
+      var viewMode = input.settings.viewMode;
+      var cards = viewMode === 'cards' || viewMode === 'cards-grid';
+      var large = viewMode === 'thumbs' || viewMode === 'large';
+
+      modal.disable();
+      modal.disableCancelBtn();
+      modal.disableSelectBtn();
+      modal.showFooterSpinner();
+      if (input.elementEditor) {
+        input.elementEditor.pause();
+      }
+
+      var response = await Craft.sendActionRequest('POST', 'app/render-elements', {
+        data: {
+          elements: [{
+            type: input.settings.elementType,
+            id: [id],
+            siteId: siteId,
+            instances: [{
+              context: 'field',
+              ui: cards ? 'card' : 'chip',
+              size: cards ? null : (large ? 'large' : 'small'),
+              showActionMenu: input.settings.showActionMenu,
+            }],
+          }],
+        },
+      });
+      var data = response.data;
+      var element = Craft.getElementInfo($(data.elements[id][0]));
+      if (Number(element.id) !== id) {
+        throw new Error('The rendered asset does not match the selection.');
+      }
+      var $newElement = input.createNewElement(element);
+
+      // Load any required assets before changing the field value, too.
+      await Craft.appendHeadHtml(data.headHtml);
+      await Craft.appendBodyHtml(data.bodyHtml);
+      if (input._$replaceElement !== $oldElement || !canSelect()) {
+        throw new Error('The field changed while preparing the replacement.');
+      }
+
+      input.appendElement($newElement);
+      $newElement.parent('li').insertBefore($oldElement.parent('li'));
+      input.addElements($newElement);
+      input.removeElement($oldElement);
+      input._$replaceElement = null;
+      element.$element = $newElement;
+      input.onSelectElements([element]);
+      input.updateDisabledElementsInModal();
+
+      modal.enable();
+      modal.enableCancelBtn();
+      modal.enableSelectBtn();
+      modal.hideFooterSpinner();
+      modal.hide();
+      if (input.elementEditor) {
+        input.elementEditor.resume();
+      }
+    },
+
+    // All creation paths await the same result before reporting success or
+    // dismissing their dialog. A standalone Assets index only needs refreshing.
+    finishSelection: async function (assetIndex, assetId) {
+      if (!Craft.Polymedia.isFieldPicker(assetIndex)) {
+        Craft.Polymedia._refreshIndex(assetIndex);
+        return true;
+      }
+
+      try {
+        if (await Craft.Polymedia.selectIntoField(assetIndex, assetId)) {
+          return true;
+        }
+      } catch (error) {
+        // Creation/import succeeded, but field insertion did not.
+      }
+      Craft.cp.displayError(Craft.t(
+        'polymedia',
+        'The media item could not be selected. It may already be selected, the field may be full, or the item may not meet the field restrictions.'
+      ));
+      return false;
     },
 
     _refreshIndex: function (assetIndex) {
@@ -707,9 +909,12 @@
       var $importBtn = $card.find('[data-action="import"]');
 
       if (canSelectExisting) {
-        $importBtn.on('click', function () {
-          Craft.Polymedia.selectIntoField(self.assetIndex, item.craftAssetId);
-          self.hide();
+        $importBtn.on('click', async function () {
+          $importBtn.addClass('loading').prop('disabled', true);
+          if (await Craft.Polymedia.finishSelection(self.assetIndex, item.craftAssetId)) {
+            self.hide();
+          }
+          $importBtn.removeClass('loading').prop('disabled', false);
         });
       } else if (!actionDisabled) {
         $importBtn.on('click', function () {
@@ -736,17 +941,17 @@
           title: item.title || '',
         },
       })
-        .then(function (response) {
+        .then(async function (response) {
           var data = response.data || {};
           var message =
             data.message || Craft.t('polymedia', 'Mux media imported.');
-          Craft.cp.displayNotice(message);
 
-          // In a field picker, hand the new asset straight to the field.
-          if (!Craft.Polymedia.selectIntoField(self.assetIndex, data.assetId)) {
-            Craft.Polymedia._refreshIndex(self.assetIndex);
+          if (!await Craft.Polymedia.finishSelection(self.assetIndex, data.assetId)) {
+            $btn.removeClass('loading').prop('disabled', false);
+            return;
           }
 
+          Craft.cp.displayNotice(message);
           self.hide();
         })
         .catch(function (error) {
@@ -1126,17 +1331,19 @@
           title: this.$title.val() || '',
         },
       })
-        .then(function (response) {
+        .then(async function (response) {
           var data = response.data || {};
           var message =
             data.message || Craft.t('polymedia', 'Mux upload complete.');
-          Craft.cp.displayNotice(message);
 
-          // In a field picker, hand the new asset straight to the field.
-          if (!Craft.Polymedia.selectIntoField(self.assetIndex, data.assetId)) {
-            Craft.Polymedia._refreshIndex(self.assetIndex);
+          if (!await Craft.Polymedia.finishSelection(self.assetIndex, data.assetId)) {
+            self.busy = false;
+            self._setUiBusy(false);
+            self._setStatus(Craft.t('polymedia', 'Media created, but not selected.'));
+            return;
           }
 
+          Craft.cp.displayNotice(message);
           self.busy = false;
           self.hide();
         })

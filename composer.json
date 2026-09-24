@@ -69,7 +69,8 @@
         "check-cs": "ecs check --ansi",
         "fix-cs": "ecs check --ansi --fix",
         "phpstan": "phpstan analyse --memory-limit=1G",
-        "test": "phpunit"
+        "test": "phpunit",
+        "test-js": "node --test tests/js/*.test.cjs"
     },
     "minimum-stability": "dev",
     "prefer-stable": true

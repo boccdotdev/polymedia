@@ -22,7 +22,7 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: ctype, curl, dom, json, mbstring, openssl, pcre, pdo, zip
+          extensions: ctype, curl, dom, json, mbstring, openssl, pcre, pdo, pdo_sqlite, zip
           coverage: none
           tools: composer:v2
 
@@ -43,6 +43,14 @@ jobs:
 
       - name: PHPUnit
         run: composer test
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Picker regression tests
+        run: composer test-js
 
       - name: Easy Coding Standard
         run: composer check-cs
