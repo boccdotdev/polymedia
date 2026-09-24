@@ -34,6 +34,7 @@ class MuxConcurrencyTest extends TestCase
     private int $saves = 0;
     private int $created = 0;
     private bool $attachmentFails = false;
+    private bool $hasStorage = true;
     private Plugin $plugin;
     private \craft\services\Elements $elements;
 
@@ -109,6 +110,9 @@ class MuxConcurrencyTest extends TestCase
             return new RelatedAssetRecord();
         });
         $this->storage = $this->createMock(SidecarStorage::class);
+        $this->storage->method('getVolume')->willReturnCallback(
+            fn() => $this->hasStorage ? new \craft\models\Volume(['id' => 2]) : null,
+        );
         $plugin = $this->getMockBuilder(Plugin::class)->disableOriginalConstructor()
             ->onlyMethods(['getMediaItems', 'getRelatedAssets', 'getSidecarStorage', 'getSettings', 'getMux', 'getPosterFetcher'])->getMock();
         $plugin->method('getMediaItems')->willReturn($this->items);
@@ -155,6 +159,18 @@ class MuxConcurrencyTest extends TestCase
         $this->saveSucceeds = true;
         self::assertNotNull($this->items->applyMuxAssetState('mux-1', ['status' => 'errored'], clone $this->record));
         self::assertSame(2, $this->saves);
+    }
+
+    public function testMissingSidecarVolumeKeepsRemoteThumbnailWithoutDownloading(): void
+    {
+        $this->hasStorage = false;
+        $fetcher = $this->getMockBuilder(PosterFetcher::class)->onlyMethods(['downloadToTemp'])->getMock();
+        $fetcher->expects($this->never())->method('downloadToTemp');
+        $this->storage->expects($this->never())->method('getItemFolder');
+        $this->items->expects($this->once())->method('patchMetadata')
+            ->with($this->record, ['thumbnail' => 'https://example.test/poster.jpg']);
+
+        self::assertNull($fetcher->fetchForItem($this->record, 'https://example.test/poster.jpg'));
     }
 
     public function testUnknownAndDisappearedStateAreIgnored(): void

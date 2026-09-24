@@ -97,6 +97,14 @@ class PosterFetcher extends Component
             return null;
         }
 
+        // Existing installations may not have configured sidecars yet. Keep
+        // their remote-thumbnail fallback without downloading an unusable file.
+        if (!Plugin::getInstance()->getSidecarStorage()->getVolume()) {
+            $this->_persistThumbnailUrl($record, $remoteUrl);
+
+            return null;
+        }
+
         // HTTP stays outside the item lock. No storage is created until the
         // item and its poster have been re-read after the download.
         $download = $this->downloadToTemp($remoteUrl);
