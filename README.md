@@ -1,18 +1,20 @@
 # Polymedia for Craft CMS
 
-Universal media field for Craft CMS — HLS, YouTube, Vimeo, Spotify, Mux, TikTok, MP4, audio, and 10+ more providers as first-class assets, with [Media Chrome](https://www.media-chrome.org/) compatible player rendering.
+Store media URLs as Craft assets. Use YouTube, Vimeo, Mux, Spotify, HLS streams, video files and other supported sources in your existing content model.
 
 ## What it's for
 
-Polymedia stores external media URLs as lightweight `.pmedia` manifest files inside your existing Craft asset volumes. Each manifest is a real Asset element — searchable, relatable, permission-gated — backed by a database record holding type metadata, playback defaults, and related poster/caption/transcript assets.
+Polymedia creates a lightweight `.pmedia` file for each media URL. It is a native Craft Asset element with search, relations, permissions and eager loading. A database record holds the provider data, playback settings and links to posters and text tracks.
 
-The front-end renders `<media-controller>` + the correct provider web component via a single Twig call. No iframes, no embed codes, no JavaScript framework lock-in.
+The manifest stays in the folder your editor chooses. Polymedia-created posters and tracks live in a separate sidecar volume, outside normal asset browsing. Existing library assets selected as posters or tracks stay where they are.
+
+Use the Twig helpers or GraphQL data with your own front end, or render a player with one Twig call. The built-in renderer uses [Media Chrome](https://www.media-chrome.org/) and provider web components, with no required JavaScript framework.
 
 ## Requirements
 
 - Craft CMS 5.0+
 - PHP 8.2+
-- Media Chrome scripts on the front-end (loaded via the `scripts()` helper or your own bundler)
+- Media Chrome and provider scripts if you use the built-in player renderer, loaded through the `scripts()` helper or your own bundler
 
 ## Installation
 
@@ -21,25 +23,29 @@ composer require boccdotdev/polymedia
 php craft plugin/install polymedia
 ```
 
-## Field Setup
+## Updating to 2.2
+
+Existing installations need a dedicated sidecar volume before creating new poster or VTT uploads. Existing attachments continue to work in place. Follow the [sidecar volume guide](#sidecar-volume) to configure storage and preview the conservative migration.
+
+## Field setup
 
 Create a **Polymedia** field (appears in the field type picker). It extends the native Assets field, so it inherits all Craft's relation features — min/max limits, eager loading, element conditions.
 
 Field settings:
 - **Allowed Providers** — restrict which provider types can be selected (e.g. only YouTube + Mux). Leave empty for all.
 
-> **Note:** The native Assets field still works with `.pmedia` files for headless or advanced use cases, but loses provider filtering.
+Native Assets fields also support `.pmedia` files and provider filtering. Use them to mix URL media with images, uploaded videos and other library assets.
 
-## Editions (Lite / Pro)
+## Editions
 
 Polymedia ships with two Craft Plugin Store editions:
 
 | Edition | Includes |
 |---------|----------|
-| **Lite** (free) | URL media for all providers (including **paste** a Mux stream URL), field, player, posters, tracks |
-| **Pro** | Everything in Lite **+** Mux Token settings, **Browse Mux library**, **Upload to Mux** (direct upload) |
+| Lite, free | URL media for every supported provider, including Mux stream URLs; fields, players, posters and text tracks |
+| Pro | Everything in Lite, plus Mux library browsing and search, direct uploads, optional signed webhooks and console status sync |
 
-Paste-a-Mux-URL playback never requires Pro. Library browse and direct upload do.
+Pasting a Mux stream URL works in Lite. The Mux library, upload and API integration tools require Pro.
 
 On non-public domains Craft allows unlicensed Pro for development (normal Craft trial rules).
 

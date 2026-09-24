@@ -1,30 +1,36 @@
 # Changelog
 
-## Unreleased
+## 2.2.0 - 2026-09-24
 
 ### Added
-- **Mux webhooks (optional, Pro).** A signed webhook endpoint (`actions/polymedia/webhooks/mux`) applies `video.asset.*` events — ready, errored, updated, deleted — so item status, duration, and posters stay current without polling. Every delivery is verified against the webhook signing secret (HMAC + replay window); the endpoint is disabled while no secret is set, unknown assets/events are acknowledged and ignored, and `video.asset.deleted` only marks stored status (never deletes the Craft asset). New **Mux Webhook Signing Secret** setting (env-var support) and a copyable **Webhook URL** on the settings page; README covers per-environment setup and local-dev tunnels. Polling and `sync-status` remain the zero-setup fallback.
-- `craft polymedia/mux/sync-status [--mux-asset-id=]` pulls current status/duration from Mux for imported items and fetches posters for newly ready assets. Works with no public endpoint (local dev) and repairs items that miss a push update; safe to run repeatedly.
-- **Field pickers get the asset, not just the library.** When “Add media” is used inside a field’s asset picker, importing a Mux video (or completing an upload, or creating from URL) now adds the resulting asset through the field’s native selection flow after checking permissions and field constraints. This also works when an eligible asset lives outside the picker’s current page or source. Already-imported videos show an enabled **Select** button in that context instead of the disabled “In Craft” state. On the standalone Assets index the behavior is unchanged.
-- **Search in Browse Mux library.** The browse modal has a native CP search field that filters your Mux library by title, passthrough, asset id, or playback id (case-insensitive, debounced, paginated). The Mux Assets API has no search endpoint, so the plugin scans the newest 1,000 assets (100/page) into a short-lived cache (2 min) and filters server-side; the modal notes when a library exceeds that window. Completing an upload invalidates the cache so new videos are searchable immediately.
-- A dedicated sidecar volume for Polymedia-managed posters and WebVTT files. New installations create a public local **Polymedia Sidecars** volume; existing installations can create it with `polymedia/setup/sidecar-volume` or select any Craft volume, including one backed by S3 or Google Cloud.
-- `polymedia/migrate/sidecars` flattens legacy `.pmedia` manifests while retaining attachments whose ownership is uncertain. It can relocate unshared managed files between sidecar volumes, supports `--dry-run`, and leaves old folders for manual review.
+- A dedicated sidecar volume for posters and WebVTT files created by Polymedia. New installations create a public local volume automatically. S3, Google Cloud Storage and other Craft filesystems are also supported.
+- `polymedia/setup/sidecar-volume` creates the default local sidecar volume on existing installations.
+- `polymedia/migrate/sidecars` flattens legacy manifest folders and can relocate unshared managed files between sidecar volumes. It supports `--dry-run`, leaves uncertain or shared attachments in place, and reports failed moves.
+- Mux library search by title, asset ID, playback ID and passthrough text. Search covers the 1,000 most recent videos and shows a notice when the library exceeds that limit.
+- Optional signed Mux webhooks for Pro. Ready, errored, updated and deleted events update existing media items. Invalid or stale signatures are rejected; unknown assets are ignored.
+- `polymedia/mux/sync-status` refreshes imported Mux items without a webhook endpoint. Use `--mux-asset-id` to target one video.
+- Local webhook setup instructions for the Mux CLI and public tunnels.
 
 ### Changed
-- Media item writes are now serialized per item with a mutex. Status/metadata/duration updates are read-modify-write on a JSON column and can run concurrently (CP request, queue job, console sync, and webhook delivery), so each write now re-reads the row under the item's lock before merging; the import flow also guards against concurrent duplicate imports of the same Mux asset. All Mux state updates flow through one idempotent `MediaItems::applyMuxAssetState()` pipeline shared by import, upload completion, console sync, and webhooks. Re-importing an existing item now also refreshes its stored status and duration (previously only the poster).
-- New `.pmedia` manifests are created directly in the editor's chosen folder rather than inside generated per-item folders.
-- Polymedia hides the configured sidecar volume from asset indexes and pickers. Existing library assets selected as posters or tracks remain in their original volume.
-- The old `polymedia/migrate/folders` command is retired because it creates the storage layout this release replaces.
+- New `.pmedia` manifests stay directly in the editor's chosen folder. Managed posters and tracks use stable asset-UID folders in the sidecar volume, which is hidden from normal asset browsing.
+- Mux imports, uploads, webhooks and console sync share the same locked state-update path. Re-importing an item also refreshes its status and duration.
+- Mux token and webhook settings require environment-variable references rather than literal credentials.
+- Retired `polymedia/migrate/folders`, which created the previous storage layout.
 
 ### Fixed
-- Sidecar migration no longer adopts another item's poster based on a matching title. Legacy or shared attachments stay in place, failed moves are reported with a non-zero exit code, and retries skip completed moves.
-- URL creation, Mux import and Mux upload share one destination rule that excludes the hidden sidecar volume and respects library permissions.
-- Mux webhooks return a retryable failure when state cannot be persisted, and console sync no longer counts failed writes as successful.
-- Background poster fetches recheck under the item lock before attaching, preserving intervening editor choices and avoiding duplicate generated posters. Hard-delete cleanup captures the item before the database cascade and serializes local cleanup after Craft's delete transaction.
-- Field picker selection rejects duplicates, full fields and ineligible assets, and waits for Craft to insert the asset before reporting success. Replacement rendering failures preserve the old value.
-- Hard-deleting a moved `.pmedia` can no longer delete its containing asset folder. Cleanup is restricted to the exact asset-UID folder in the configured sidecar volume.
-- Flat folders support duplicate media titles by asking Craft for a collision-free `.pmedia` filename.
-- Mux token and webhook settings now reject literal credentials and require environment-variable references, preventing secrets from being written to project config. Automatic sidecar setup updates only its own setting rather than re-saving the complete settings model.
+- Hard-deleting a moved manifest no longer deletes its containing library folder. Cleanup targets only its owned sidecar folder.
+- Adding media from a field picker now selects it into the field, including eligible assets outside the current page or source.
+- Picker selection respects disabled assets, field limits and selection criteria. Failed replacement rendering leaves the old value intact.
+- Background poster fetching preserves intervening editor choices and avoids duplicate generated posters.
+- Webhooks return HTTP 503 when a lock or state write fails, allowing Mux to retry. Console sync reports those failures instead of counting them as successful.
+- Manifest creation excludes the sidecar volume and handles duplicate titles without filename collisions.
+- Migration preserves earlier successful results when a later operation fails. Retrying skips completed moves.
+- Settings saves and automatic sidecar setup preserve environment-variable references.
+
+### Upgrade notes
+- Configure a dedicated sidecar volume before using new poster or VTT uploads. Existing installations can run `php craft polymedia/setup/sidecar-volume` or select a separate volume in plugin settings. Keep its filesystem path or object prefix outside every other volume's indexed path.
+- Preview legacy migration with `php craft polymedia/migrate/sidecars --dry-run`. Legacy posters and tracks remain linked in their original locations because older versions did not record ownership. Do not remove folders that still contain retained files.
+- Supply Mux credentials through environment variables and select their references in settings. Webhooks remain optional; upload polling and console sync still work without them.
 
 ## 2.1.3 - 2026-07-17
 
