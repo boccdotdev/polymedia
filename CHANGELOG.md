@@ -19,6 +19,7 @@
 ### Fixed
 - Hard-deleting a moved `.pmedia` can no longer delete its containing asset folder. Cleanup is restricted to the exact asset-UID folder in the configured sidecar volume.
 - Flat folders support duplicate media titles by asking Craft for a collision-free `.pmedia` filename.
+- Mux token and webhook settings now reject literal credentials and require environment-variable references, preventing secrets from being written to project config. Automatic sidecar setup updates only its own setting rather than re-saving the complete settings model.
 
 ## 2.1.3 - 2026-07-17
 

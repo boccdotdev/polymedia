@@ -18,6 +18,7 @@ use craft\elements\Asset;
 use craft\fs\Local;
 use craft\models\Volume;
 use craft\models\VolumeFolder;
+use craft\services\ProjectConfig;
 use yii\base\Component;
 use yii\base\InvalidArgumentException;
 
@@ -257,11 +258,12 @@ class SidecarStorage extends Component
     private function _configure(Volume $volume): void
     {
         $plugin = Plugin::getInstance();
-        $settings = $plugin->getSettings();
-        $settings->sidecarVolumeUid = $volume->uid;
+        $plugin->getSettings()->sidecarVolumeUid = $volume->uid;
 
-        if (!Craft::$app->getPlugins()->savePluginSettings($plugin, $settings->toArray())) {
-            throw new InvalidArgumentException('Could not save the Polymedia sidecar volume setting.');
-        }
+        Craft::$app->getProjectConfig()->set(
+            ProjectConfig::PATH_PLUGINS . ".{$plugin->handle}.settings.sidecarVolumeUid",
+            $volume->uid,
+            'Configure the Polymedia sidecar volume',
+        );
     }
 }

@@ -59,7 +59,7 @@ You can also set a poster image right on the **From URL** screen. Existing libra
 ### Mux library & upload (Pro)
 
 1. Install **Pro** and open **Settings → Plugins → Polymedia → Mux**.
-2. Enter a Mux API **Token ID** and **Token Secret** (env vars supported, e.g. `$MUX_TOKEN_ID`).
+2. Add the Mux API **Token ID** and **Token Secret** to each environment, then select their references in plugin settings (for example `$MUX_TOKEN_ID` and `$MUX_TOKEN_SECRET`). Polymedia rejects literal credentials so they cannot be written to project config.
 3. On the Assets index (or field asset modal), open the **Add media** menu and use:
    - **Browse Mux library** — live list from your Mux account; import creates a `.pmedia` or reuses one matched by **playback ID**.
    - **Upload to Mux** — browser direct upload (UpChunk); when Mux has a playback ID, Craft creates/reuses the `.pmedia`.

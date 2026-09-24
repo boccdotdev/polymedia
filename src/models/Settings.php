@@ -148,6 +148,13 @@ class Settings extends Model
 
         $rules[] = [['mediaChromeVersion', 'scriptLoaderMode', 'cdnHost'], 'required'];
         $rules[] = [['mediaChromeVersion', 'cdnHost', 'muxTokenId', 'muxTokenSecret', 'muxWebhookSecret'], 'string'];
+        $rules[] = [
+            ['muxTokenId', 'muxTokenSecret', 'muxWebhookSecret'],
+            'match',
+            'pattern' => '/^\$[A-Za-z_][A-Za-z0-9_]*$/',
+            'skipOnEmpty' => true,
+            'message' => 'Use an environment variable reference such as `$MUX_TOKEN_ID`. Literal credentials cannot be saved to project config.',
+        ];
         $rules[] = [['selfHostBaseUrl'], 'string'];
         $rules[] = [['defaultVolumeUid', 'attachmentsVolumeUid', 'sidecarVolumeUid'], 'string', 'max' => 36];
         $rules[] = [

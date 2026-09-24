@@ -185,7 +185,7 @@
 
     {{ forms.autosuggestField({
         label: 'Mux Token ID'|t('polymedia'),
-        instructions: 'API access token ID from the Mux dashboard. Supports env vars (`$MUX_TOKEN_ID`).'|t('polymedia'),
+        instructions: 'API access token ID from the Mux dashboard. Select an environment variable such as `$MUX_TOKEN_ID`; literal values cannot be saved to project config.'|t('polymedia'),
         id: 'muxTokenId',
         name: 'muxTokenId',
         value: settings.muxTokenId,
@@ -196,7 +196,7 @@
 
     {{ forms.autosuggestField({
         label: 'Mux Token Secret'|t('polymedia'),
-        instructions: 'API access token secret. Supports env vars (`$MUX_TOKEN_SECRET`).'|t('polymedia'),
+        instructions: 'API access token secret. Select an environment variable such as `$MUX_TOKEN_SECRET`; literal values cannot be saved to project config.'|t('polymedia'),
         id: 'muxTokenSecret',
         name: 'muxTokenSecret',
         value: settings.muxTokenSecret,
@@ -216,7 +216,7 @@
 
     {{ forms.autosuggestField({
         label: 'Mux Webhook Signing Secret'|t('polymedia'),
-        instructions: 'Optional. When set, Mux webhooks keep item status and posters current without polling; leave empty to disable the webhook endpoint. Each Mux environment’s webhook has its own secret. Supports env vars (`$MUX_WEBHOOK_SECRET`).'|t('polymedia'),
+        instructions: 'Optional. When set, Mux webhooks keep item status and posters current without polling; leave empty to disable the webhook endpoint. Select an environment variable such as `$MUX_WEBHOOK_SECRET`; literal values cannot be saved to project config.'|t('polymedia'),
         id: 'muxWebhookSecret',
         name: 'muxWebhookSecret',
         value: settings.muxWebhookSecret,

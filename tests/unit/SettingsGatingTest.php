@@ -38,6 +38,46 @@ class SettingsGatingTest extends TestCase
         $this->assertTrue($settings->autoFetchPoster);
     }
 
+    public function testMuxCredentialsMustUseEnvironmentReferences(): void
+    {
+        if (!class_exists(\Yii::class, false)) {
+            require_once dirname(__DIR__, 2) . '/vendor/yiisoft/yii2/Yii.php';
+        }
+        if (\Yii::$app === null) {
+            new \yii\console\Application([
+                'id' => 'polymedia-tests',
+                'basePath' => dirname(__DIR__, 2),
+            ]);
+        }
+
+        $literal = new Settings([
+            'muxTokenId' => 'literal-token-id',
+            'muxTokenSecret' => 'literal-token-secret',
+            'muxWebhookSecret' => 'literal-webhook-secret',
+        ]);
+
+        $this->assertFalse($literal->validate([
+            'muxTokenId',
+            'muxTokenSecret',
+            'muxWebhookSecret',
+        ]));
+        $this->assertTrue($literal->hasErrors('muxTokenId'));
+        $this->assertTrue($literal->hasErrors('muxTokenSecret'));
+        $this->assertTrue($literal->hasErrors('muxWebhookSecret'));
+
+        $references = new Settings([
+            'muxTokenId' => '$MUX_TOKEN_ID',
+            'muxTokenSecret' => '$MUX_TOKEN_SECRET',
+            'muxWebhookSecret' => '$MUX_WEBHOOK_SECRET',
+        ]);
+
+        $this->assertTrue($references->validate([
+            'muxTokenId',
+            'muxTokenSecret',
+            'muxWebhookSecret',
+        ]));
+    }
+
     public function testEditionsAreLiteThenPro(): void
     {
         $this->assertSame(
