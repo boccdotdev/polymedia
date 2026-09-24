@@ -12,13 +12,10 @@
 namespace boccdotdev\polymedia\controllers;
 
 use boccdotdev\polymedia\models\DetectionResult;
-use boccdotdev\polymedia\models\Settings;
 use boccdotdev\polymedia\Plugin;
 use Craft;
 use craft\elements\Asset;
-use craft\elements\User;
 use craft\helpers\UrlHelper;
-use craft\models\VolumeFolder;
 use craft\web\Controller;
 use yii\web\Response;
 
@@ -152,12 +149,12 @@ class MuxController extends Controller
 
         $settings = $plugin->getSettings();
         $currentUser = Craft::$app->getUser()->getIdentity();
-        $folder = $this->_resolveFolder($folderId, $currentUser, $settings);
+        $folder = $plugin->getManifestWriter()->resolveFolder($folderId, $currentUser, $settings);
 
         if (!$folder) {
             return $this->asFailure(Craft::t(
                 'polymedia',
-                'You do not have permission to save assets in this volume.',
+                'Choose a writable library volume for media. The sidecar volume cannot contain media manifests.',
             ));
         }
 
@@ -437,12 +434,12 @@ class MuxController extends Controller
 
         $settings = $plugin->getSettings();
         $currentUser = Craft::$app->getUser()->getIdentity();
-        $folder = $this->_resolveFolder($folderId, $currentUser, $settings);
+        $folder = $plugin->getManifestWriter()->resolveFolder($folderId, $currentUser, $settings);
 
         if (!$folder) {
             return $this->asFailure(Craft::t(
                 'polymedia',
-                'You do not have permission to save assets in this volume.',
+                'Choose a writable library volume for media. The sidecar volume cannot contain media manifests.',
             ));
         }
 
@@ -534,60 +531,5 @@ class MuxController extends Controller
         }
 
         return null;
-    }
-
-    /**
-     * Resolves the target folder for a new `.pmedia` asset (mirrors MediaItemsController).
-     *
-     * @param int|null $folderId
-     * @param User|null $user
-     * @param Settings $settings
-     * @return ?VolumeFolder
-     */
-    private function _resolveFolder(?int $folderId, ?User $user, Settings $settings): ?VolumeFolder
-    {
-        $assets = Craft::$app->getAssets();
-
-        if ($folderId) {
-            $folder = $assets->getFolderById($folderId);
-
-            if ($folder && $this->_canSave($folder, $user)) {
-                return $folder;
-            }
-        }
-
-        if ($settings->defaultVolumeUid) {
-            $volume = Craft::$app->getVolumes()->getVolumeByUid($settings->defaultVolumeUid);
-
-            if ($volume) {
-                $folder = $assets->getRootFolderByVolumeId($volume->id);
-
-                if ($folder && $this->_canSave($folder, $user)) {
-                    return $folder;
-                }
-            }
-        }
-
-        foreach (Craft::$app->getVolumes()->getAllVolumes() as $volume) {
-            if ($user && $user->can("saveAssets:$volume->uid")) {
-                return $assets->getRootFolderByVolumeId($volume->id);
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * @param VolumeFolder $folder
-     * @param User|null $user
-     * @return bool
-     */
-    private function _canSave(VolumeFolder $folder, ?User $user): bool
-    {
-        if (!$user || !$folder->volumeId) {
-            return false;
-        }
-
-        return $user->can("saveAssets:{$folder->getVolume()->uid}");
     }
 }

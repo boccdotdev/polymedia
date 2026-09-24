@@ -11,13 +11,10 @@
 
 namespace boccdotdev\polymedia\controllers;
 
-use boccdotdev\polymedia\models\Settings;
 use boccdotdev\polymedia\Plugin;
 use boccdotdev\polymedia\records\MediaItemRecord;
 use Craft;
 use craft\elements\Asset;
-use craft\elements\User;
-use craft\models\VolumeFolder;
 use craft\web\Controller;
 use yii\web\Response;
 
@@ -62,7 +59,15 @@ class MediaItemsController extends Controller
 
         $currentUser = Craft::$app->getUser()->getIdentity();
         $folderId = (int)Craft::$app->getRequest()->getParam('folderId') ?: null;
-        $folder = $this->_resolveFolder($folderId, $currentUser, $settings);
+        $folder = $plugin->getManifestWriter()->resolveFolder($folderId, $currentUser, $settings);
+
+        if (!$folder) {
+            throw new \yii\web\ForbiddenHttpException(Craft::t(
+                'polymedia',
+                'Choose a writable library volume for media. The sidecar volume cannot contain media manifests.',
+            ));
+        }
+
         $posterUploadFolder = $plugin->getSidecarStorage()->getRootFolder();
 
         return $this->asCpScreen()
@@ -106,10 +111,13 @@ class MediaItemsController extends Controller
         }
 
         $currentUser = Craft::$app->getUser()->getIdentity();
-        $folder = $this->_resolveFolder($folderId, $currentUser, $settings);
+        $folder = $plugin->getManifestWriter()->resolveFolder($folderId, $currentUser, $settings);
 
         if (!$folder) {
-            return $this->asFailure(Craft::t('polymedia', 'You do not have permission to save assets in this volume.'));
+            return $this->asFailure(Craft::t(
+                'polymedia',
+                'Choose a writable library volume for media. The sidecar volume cannot contain media manifests.',
+            ));
         }
 
         $volume = $folder->getVolume();
@@ -197,67 +205,6 @@ class MediaItemsController extends Controller
         }
 
         Plugin::getInstance()->getSidecarStorage()->adoptRootUpload($poster, $record);
-    }
-
-    /**
-     * Resolves the target folder for a new `.pmedia` asset.
-     *
-     * Prefers the folder the user is currently viewing (passed from the asset
-     * index), then the configured default volume, then the first volume the
-     * user can save to. Only returns a folder the user has permission to use.
-     *
-     * @param int|null $folderId the current source folder, if any
-     * @param User|null $user the current user
-     * @param Settings $settings the plugin settings
-     * @return VolumeFolder|null
-     */
-    private function _resolveFolder(?int $folderId, ?User $user, Settings $settings): ?VolumeFolder
-    {
-        $assets = Craft::$app->getAssets();
-
-        if ($folderId) {
-            $folder = $assets->getFolderById($folderId);
-
-            if ($folder && $this->_canSave($folder, $user)) {
-                return $folder;
-            }
-        }
-
-        if ($settings->defaultVolumeUid) {
-            $volume = Craft::$app->getVolumes()->getVolumeByUid($settings->defaultVolumeUid);
-
-            if ($volume) {
-                $folder = $assets->getRootFolderByVolumeId($volume->id);
-
-                if ($folder && $this->_canSave($folder, $user)) {
-                    return $folder;
-                }
-            }
-        }
-
-        foreach (Craft::$app->getVolumes()->getAllVolumes() as $volume) {
-            if ($user && $user->can("saveAssets:$volume->uid")) {
-                return $assets->getRootFolderByVolumeId($volume->id);
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Checks whether the user can save assets in the given folder's volume.
-     *
-     * @param VolumeFolder $folder the target folder
-     * @param User|null $user the current user
-     * @return bool
-     */
-    private function _canSave(VolumeFolder $folder, ?User $user): bool
-    {
-        if (!$user || !$folder->volumeId) {
-            return false;
-        }
-
-        return $user->can("saveAssets:{$folder->getVolume()->uid}");
     }
 
     /**

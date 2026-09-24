@@ -13,13 +13,16 @@ namespace boccdotdev\polymedia\services;
 
 use boccdotdev\polymedia\models\DetectionResult;
 use boccdotdev\polymedia\models\PlayerSettings;
+use boccdotdev\polymedia\models\Settings;
 use boccdotdev\polymedia\Plugin;
 use boccdotdev\polymedia\records\MediaItemRecord;
 use Craft;
 use craft\elements\Asset;
+use craft\elements\User;
 use craft\helpers\Assets;
 use craft\helpers\Json;
 use craft\helpers\StringHelper;
+use craft\models\VolumeFolder;
 use yii\base\Component;
 use yii\base\InvalidArgumentException;
 
@@ -36,6 +39,64 @@ class ManifestWriter extends Component
 {
     // Public Methods
     // =========================================================================
+
+    /**
+     * Resolves a writable library destination for every manifest creation flow.
+     *
+     * Explicit sidecar destinations are rejected, never silently redirected.
+     * Otherwise prefer the current folder, configured default, then the first
+     * writable ordinary volume. Sidecars are not a manifest destination.
+     */
+    public function resolveFolder(?int $folderId, ?User $user, Settings $settings): ?VolumeFolder
+    {
+        if (!$user) {
+            return null;
+        }
+
+        $assets = Craft::$app->getAssets();
+        $writable = [];
+        $sidecarVolumeId = null;
+
+        foreach (Craft::$app->getVolumes()->getAllVolumes() as $volume) {
+            if ($volume->uid === $settings->sidecarVolumeUid) {
+                $sidecarVolumeId = (int)$volume->id;
+            } elseif ($user->can("saveAssets:{$volume->uid}")) {
+                $writable[(int)$volume->id] = $volume;
+            }
+        }
+
+        if ($folderId) {
+            $folder = $assets->getFolderById($folderId);
+
+            if ($folder && $sidecarVolumeId !== null && (int)$folder->volumeId === $sidecarVolumeId) {
+                return null;
+            }
+
+            if ($folder && isset($writable[(int)$folder->volumeId])) {
+                return $folder;
+            }
+        }
+
+        foreach ($writable as $volume) {
+            if ($volume->uid === $settings->defaultVolumeUid) {
+                $root = $assets->getRootFolderByVolumeId((int)$volume->id);
+
+                if ($root) {
+                    return $root;
+                }
+            }
+        }
+
+        foreach ($writable as $volume) {
+            $root = $assets->getRootFolderByVolumeId((int)$volume->id);
+
+            if ($root) {
+                return $root;
+            }
+        }
+
+        return null;
+    }
 
     /**
      * Creates a new `.pmedia` manifest asset in the given volume folder.
