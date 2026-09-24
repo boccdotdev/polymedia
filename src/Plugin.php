@@ -500,7 +500,6 @@ class Plugin extends BasePlugin
             \craft\services\Elements::class,
             \craft\services\Elements::EVENT_AFTER_DELETE_ELEMENT,
             function(\craft\events\ElementEvent $e) use (&$deleting) {
-                /** @var Asset $asset */
                 $asset = $e->element;
 
                 if (!$asset instanceof Asset || $asset->kind !== 'polymedia') {
