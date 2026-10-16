@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- A forced poster re-fetch (`PosterFetcher::fetchForItem(..., force: true)`) no longer fails with “A file with the name … already exists”. Poster filenames now include a hash of the image, so the replacement saves beside the old poster and gets a new URL that CDNs haven't cached. The replaced poster is deleted once the new one is attached, but only when it is a Polymedia-managed file in the item's sidecar folder that nothing else uses. ([#4](https://github.com/boccdotdev/polymedia/issues/4))
+
 ## 2.2.0 - 2026-09-24
 
 > [!WARNING]
