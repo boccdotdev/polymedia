@@ -74,6 +74,20 @@ class PolymediaVariable
     }
 
     /**
+     * Returns the media's aspect ratio as a CSS `aspect-ratio` value.
+     *
+     * @param Asset $asset the `.pmedia` asset
+     * @return ?string e.g. `16 / 9`, or null when unknown
+     *
+     * @author boccdotdev
+     * @since 2.3.0
+     */
+    public function aspectRatio(Asset $asset): ?string
+    {
+        return Plugin::getInstance()->getRenderer()->aspectRatio($asset);
+    }
+
+    /**
      * Checks whether a value is a polymedia asset.
      *
      * @param mixed $asset the value to check

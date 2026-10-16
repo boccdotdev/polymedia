@@ -48,15 +48,18 @@ class MuxConcurrencyTest extends TestCase
             public $duration;
             public $title;
             public $type;
+            public $width;
+            public $height;
 
             public function attributes(): array
             {
-                return ['id', 'assetId', 'metadata', 'duration', 'title', 'type'];
+                return ['id', 'assetId', 'metadata', 'duration', 'title', 'type', 'width', 'height'];
             }
         };
         $this->record->setAttributes([
             'id' => 7, 'assetId' => 70, 'metadata' => '{}',
             'duration' => null, 'title' => 'Example', 'type' => 'mux',
+            'width' => null, 'height' => null,
         ], false);
 
         $mutex = $this->createMock(FileMutex::class);
@@ -144,6 +147,21 @@ class MuxConcurrencyTest extends TestCase
         self::assertNotNull($this->items->applyMuxAssetState('mux-1', ['status' => 'errored'], $this->record));
         self::assertSame(1, $this->saves);
         self::assertFalse($this->locked);
+    }
+
+    public function testDimensionsAloneArePersisted(): void
+    {
+        $this->items->applyMuxAssetState('mux-1', ['status' => 'errored'], $this->record);
+        $record = clone $this->record;
+        $state = ['status' => 'errored', 'width' => 1080, 'height' => 1920];
+
+        self::assertNotNull($this->items->applyMuxAssetState('mux-1', $state, $record));
+        self::assertSame(2, $this->saves);
+        self::assertSame([1080, 1920], [$this->record->width, $this->record->height]);
+        self::assertSame([1080, 1920], [$record->width, $record->height]);
+
+        self::assertNotNull($this->items->applyMuxAssetState('mux-1', $state, $record));
+        self::assertSame(2, $this->saves);
     }
 
     public function testStateSaveFailureIsRetryable(): void

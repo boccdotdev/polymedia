@@ -269,6 +269,18 @@ Renders script tags. Options: `providers` (array), `version` (Media Chrome major
 
 Returns the resolved poster URL for a polymedia asset.
 
+### `craft.polymedia.aspectRatio(asset)`
+
+Returns the media's aspect ratio as a CSS `aspect-ratio` value (`16 / 9`), or `null` when it isn't known. Use it to reserve the player's box so lazy-loaded players don't shift the page:
+
+```twig
+<div style="aspect-ratio: {{ craft.polymedia.aspectRatio(media) ?? '16 / 9' }}">
+    {{ craft.polymedia.player(media) }}
+</div>
+```
+
+Mux items store the ratio Mux reports (`metadata.aspectRatio`, e.g. `9:16`) and the video's stored `width`/`height` on import, upload, sync, and webhook updates. Items imported before 2.3 get them on their next update; run `craft polymedia/mux/sync-status` to fill them in for all of them. For other providers it returns `null` unless `metadata.aspectRatio` or `width`/`height` are set. The dimensions are also available as `width`/`height` in `craft.polymedia.data(asset)` and GraphQL.
+
 ### `craft.polymedia.tracks(asset, role, siteId)`
 
 Returns track-type related assets (captions, subtitles, descriptions).
@@ -310,6 +322,7 @@ Twig getter shorthand also works — drop the `get` and the parens:
 | `getElement(options = {})` | `Markup` | `craft.polymedia.element(asset, options)` |
 | `getData()` | `array` | `craft.polymedia.data(asset)` |
 | `getPoster()` | `string\|null` | `craft.polymedia.poster(asset)` |
+| `getAspectRatio()` | `string\|null` | `craft.polymedia.aspectRatio(asset)` |
 | `getTracks(role = 'captions', siteId = null)` | `Asset[]` | `craft.polymedia.tracks(asset, role, siteId)` |
 | `getTranscript()` | `Asset\|null` | `craft.polymedia.transcript(asset)` |
 | `getIsPolymedia()` | `bool` | `craft.polymedia.is(asset)` |

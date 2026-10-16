@@ -13,6 +13,7 @@ use boccdotdev\polymedia\Plugin;
 use boccdotdev\polymedia\services\EditorContent;
 use boccdotdev\polymedia\services\MediaItems;
 use boccdotdev\polymedia\services\Mux;
+use boccdotdev\polymedia\services\Renderer;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -141,6 +142,11 @@ class SettingsGatingTest extends TestCase
             'id' => 'asset-1',
             'status' => 'ready',
             'duration' => 24.1,
+            'aspect_ratio' => '1:1',
+            'tracks' => [
+                ['type' => 'audio', 'id' => 'audio-1'],
+                ['type' => 'video', 'max_width' => 1080, 'max_height' => 1080],
+            ],
             'playback_ids' => [
                 ['id' => 'signed-pb', 'policy' => 'signed'],
                 ['id' => 'public-pb', 'policy' => 'public'],
@@ -152,6 +158,9 @@ class SettingsGatingTest extends TestCase
         $this->assertSame('public', $state['playbackPolicy']);
         $this->assertSame('ready', $state['status']);
         $this->assertSame(24.1, $state['duration']);
+        $this->assertSame('1:1', $state['aspectRatio']);
+        $this->assertSame(1080, $state['width']);
+        $this->assertSame(1080, $state['height']);
 
         // Falls back to the first playback id when none are public.
         $signedOnly = Mux::mapWebhookAssetData([
@@ -164,6 +173,9 @@ class SettingsGatingTest extends TestCase
         $empty = Mux::mapWebhookAssetData([]);
         $this->assertSame('', $empty['assetId']);
         $this->assertNull($empty['playbackId']);
+        $this->assertNull($empty['aspectRatio']);
+        $this->assertNull($empty['width']);
+        $this->assertNull($empty['height']);
     }
 
     public function testMergeMuxAssetStateAppliesStatusDurationAndAssetId(): void
@@ -216,6 +228,66 @@ class SettingsGatingTest extends TestCase
         $zero = MediaItems::mergeMuxAssetState([], null, 'asset-1', ['duration' => 0]);
         $this->assertSame(['muxAssetId' => 'asset-1'], $zero['metadata']);
         $this->assertNull($zero['duration']);
+    }
+
+    public function testMergeMuxAssetStateStoresAspectRatio(): void
+    {
+        $first = MediaItems::mergeMuxAssetState(['muxAssetId' => 'asset-1'], null, 'asset-1', ['aspectRatio' => '9:16']);
+        $this->assertTrue($first['changed']);
+        $this->assertSame('9:16', $first['metadata']['aspectRatio']);
+
+        $same = MediaItems::mergeMuxAssetState($first['metadata'], null, 'asset-1', ['aspectRatio' => '9:16']);
+        $this->assertFalse($same['changed']);
+
+        // Missing or malformed ratios never clear a stored one.
+        foreach ([null, '', 'wide', '0:9', '16:0'] as $invalid) {
+            $kept = MediaItems::mergeMuxAssetState($first['metadata'], null, 'asset-1', ['aspectRatio' => $invalid]);
+            $this->assertFalse($kept['changed']);
+            $this->assertSame('9:16', $kept['metadata']['aspectRatio']);
+        }
+    }
+
+    public function testVideoTrackDimensionsSkipsUnsizedTracks(): void
+    {
+        $this->assertSame(['width' => null, 'height' => null], Mux::videoTrackDimensions(null));
+        $this->assertSame(['width' => null, 'height' => null], Mux::videoTrackDimensions([
+            ['type' => 'audio', 'max_width' => 1920, 'max_height' => 1080],
+            ['type' => 'video', 'max_width' => 1920],
+            'not-a-track',
+        ]));
+        $this->assertSame(['width' => 720, 'height' => 1280], Mux::videoTrackDimensions([
+            ['type' => 'video'],
+            ['type' => 'video', 'max_width' => 720, 'max_height' => 1280],
+        ]));
+    }
+
+    public function testMergeMuxDimensions(): void
+    {
+        $first = MediaItems::mergeMuxDimensions(null, null, ['width' => 1920, 'height' => 1080]);
+        $this->assertSame(['width' => 1920, 'height' => 1080, 'changed' => true], $first);
+
+        $this->assertFalse(MediaItems::mergeMuxDimensions(1920, 1080, ['width' => 1920, 'height' => 1080])['changed']);
+
+        // Missing, partial, or zero dimensions never clear stored ones.
+        foreach ([[], ['width' => 1920], ['width' => 0, 'height' => 1080], ['width' => 'wide', 'height' => 1080]] as $state) {
+            $this->assertSame(
+                ['width' => 1920, 'height' => 1080, 'changed' => false],
+                MediaItems::mergeMuxDimensions(1920, 1080, $state),
+            );
+        }
+    }
+
+    public function testCssAspectRatio(): void
+    {
+        $this->assertSame('16 / 9', Renderer::cssAspectRatio('16:9'));
+        $this->assertSame('2.39 / 1', Renderer::cssAspectRatio('2.39:1'));
+        $this->assertSame('1 / 1', Renderer::cssAspectRatio(' 1 / 1 '));
+        $this->assertNull(Renderer::cssAspectRatio(null));
+        $this->assertNull(Renderer::cssAspectRatio(''));
+        $this->assertNull(Renderer::cssAspectRatio('16x9'));
+        $this->assertNull(Renderer::cssAspectRatio('0:9'));
+        $this->assertNull(Renderer::cssAspectRatio('-16:9'));
+        $this->assertNull(Renderer::cssAspectRatio(1.78));
     }
 
     public function testDecodeMetadataJson(): void

@@ -196,6 +196,53 @@ class Renderer extends Component
     }
 
     /**
+     * Returns the media's aspect ratio as a CSS `aspect-ratio` value.
+     *
+     * Lets a template size the player's box before the video loads, so lazy
+     * players don't shift the page. Prefers the stored ratio (Mux's display
+     * ratio), then the stored video dimensions. Mux items store both.
+     *
+     * @param Asset $asset the `.pmedia` asset
+     * @return ?string e.g. `16 / 9`, or null when the ratio is unknown
+     *
+     * @author boccdotdev
+     * @since 2.3.0
+     */
+    public function aspectRatio(Asset $asset): ?string
+    {
+        $manifest = $this->data($asset);
+
+        return self::cssAspectRatio($manifest['metadata']['aspectRatio'] ?? null)
+            ?? (isset($manifest['width'], $manifest['height'])
+                ? self::cssAspectRatio("{$manifest['width']}:{$manifest['height']}")
+                : null);
+    }
+
+    /**
+     * Converts a stored `W:H` ratio to a CSS `aspect-ratio` value.
+     *
+     * Pure function — exposed static for unit testing.
+     *
+     * @param mixed $ratio a ratio such as `16:9` (as Mux reports it) or `16/9`
+     * @return ?string e.g. `16 / 9`, or null when the value isn't a positive ratio
+     *
+     * @author boccdotdev
+     * @since 2.3.0
+     */
+    public static function cssAspectRatio(mixed $ratio): ?string
+    {
+        if (!is_string($ratio)
+            || !preg_match('/^\s*(\d+(?:\.\d+)?)\s*[:\/]\s*(\d+(?:\.\d+)?)\s*$/', $ratio, $matches)
+            || (float)$matches[1] <= 0
+            || (float)$matches[2] <= 0
+        ) {
+            return null;
+        }
+
+        return "{$matches[1]} / {$matches[2]}";
+    }
+
+    /**
      * Checks whether a given asset is a polymedia asset.
      *
      * @param mixed $asset the value to check

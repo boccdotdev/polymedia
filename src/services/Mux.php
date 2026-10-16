@@ -231,7 +231,7 @@ class Mux extends Component
      * matching the import flow's preference.
      *
      * @param array $data the event's `data` payload (a Mux asset object)
-     * @return array{assetId: string, playbackId: ?string, playbackPolicy: ?string, status: string, duration: mixed}
+     * @return array{assetId: string, playbackId: ?string, playbackPolicy: ?string, status: string, duration: mixed, aspectRatio: ?string, width: ?int, height: ?int}
      *
      * @author boccdotdev
      * @since 2.2.0
@@ -268,7 +268,39 @@ class Mux extends Component
             'playbackPolicy' => $playbackPolicy,
             'status' => isset($data['status']) ? (string)$data['status'] : '',
             'duration' => $data['duration'] ?? null,
+            'aspectRatio' => isset($data['aspect_ratio']) ? (string)$data['aspect_ratio'] : null,
+            ...self::videoTrackDimensions((array)($data['tracks'] ?? [])),
         ];
+    }
+
+    /**
+     * Reads the video track's stored dimensions from a Mux asset's tracks.
+     *
+     * Accepts webhook arrays and SDK `Track` models alike; both are
+     * array-accessible. Pure function — exposed static for unit testing.
+     *
+     * @param ?iterable $tracks the asset's `tracks`
+     * @return array{width: ?int, height: ?int} both null when there is no sized video track
+     *
+     * @author boccdotdev
+     * @since 2.3.0
+     */
+    public static function videoTrackDimensions(?iterable $tracks): array
+    {
+        foreach ($tracks ?? [] as $track) {
+            if ((!is_array($track) && !$track instanceof \ArrayAccess) || ($track['type'] ?? null) !== 'video') {
+                continue;
+            }
+
+            $width = (int)($track['max_width'] ?? 0);
+            $height = (int)($track['max_height'] ?? 0);
+
+            if ($width > 0 && $height > 0) {
+                return ['width' => $width, 'height' => $height];
+            }
+        }
+
+        return ['width' => null, 'height' => null];
     }
 
     /**
@@ -581,6 +613,7 @@ class Mux extends Component
             'status' => $asset->getStatus(),
             'duration' => $asset->getDuration(),
             'aspectRatio' => $asset->getAspectRatio(),
+            ...self::videoTrackDimensions($asset->getTracks()),
             'thumbnailUrl' => $thumbnailUrl,
             'createdAt' => $asset->getCreatedAt(),
             'passthrough' => $asset->getPassthrough(),

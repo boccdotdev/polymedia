@@ -426,12 +426,13 @@ class MediaItems extends Component
      *
      * The one idempotent, lock-guarded transition shared by the CP
      * import/upload flow, console sync command, and webhook endpoint: stores
-     * `muxStatus`/`muxAssetId` metadata, updates the duration, and kicks the
-     * poster fetcher once the asset is ready.
+     * `muxStatus`/`muxAssetId`/`aspectRatio` metadata, updates the duration
+     * and video dimensions, and kicks the poster fetcher once the asset is ready.
      *
      * @param string $muxAssetId the Mux asset id
      * @param array $state mapped asset state ({@see Mux::mapAsset()}): uses
-     *                     `status`, `duration`, `playbackId`
+     *                     `status`, `duration`, `aspectRatio`, `width`,
+     *                     `height`, `playbackId`
      * @param ?MediaItemRecord $record the media item, when the caller already
      *                                 has it; otherwise looked up by playback
      *                                 id, then by Mux asset id
@@ -466,23 +467,27 @@ class MediaItems extends Component
                 $muxAssetId,
                 $state,
             );
+            $dimensions = self::mergeMuxDimensions(
+                $fresh->width !== null ? (int)$fresh->width : null,
+                $fresh->height !== null ? (int)$fresh->height : null,
+                $state,
+            );
 
-            if (!$merge['changed']) {
-                $record->metadata = $fresh->metadata;
-                $record->duration = $fresh->duration;
+            if ($merge['changed'] || $dimensions['changed']) {
+                $fresh->metadata = Json::encode($merge['metadata']);
+                $fresh->duration = $merge['duration'];
+                $fresh->width = $dimensions['width'];
+                $fresh->height = $dimensions['height'];
 
-                return true;
-            }
-
-            $fresh->metadata = Json::encode($merge['metadata']);
-            $fresh->duration = $merge['duration'];
-
-            if (!$this->save($fresh)) {
-                throw new \RuntimeException("Could not persist Mux state for media item #{$record->id}.");
+                if (!$this->save($fresh)) {
+                    throw new \RuntimeException("Could not persist Mux state for media item #{$record->id}.");
+                }
             }
 
             $record->metadata = $fresh->metadata;
             $record->duration = $fresh->duration;
+            $record->width = $fresh->width;
+            $record->height = $fresh->height;
 
             return true;
         });
@@ -512,7 +517,7 @@ class MediaItems extends Component
      * @param array<string, mixed> $metadata current metadata
      * @param ?int $duration current duration in seconds
      * @param string $muxAssetId the Mux asset id
-     * @param array $state incoming state (`status`, `duration`)
+     * @param array $state incoming state (`status`, `duration`, `aspectRatio`)
      * @return array{metadata: array<string, mixed>, duration: ?int, changed: bool}
      *
      * @author boccdotdev
@@ -543,7 +548,43 @@ class MediaItems extends Component
             }
         }
 
+        // Stored as Mux reports it (`W:H`) so templates can reserve the box.
+        $aspectRatio = isset($state['aspectRatio']) ? (string)$state['aspectRatio'] : '';
+
+        if (Renderer::cssAspectRatio($aspectRatio) !== null && ($metadata['aspectRatio'] ?? null) !== $aspectRatio) {
+            $metadata['aspectRatio'] = $aspectRatio;
+            $changed = true;
+        }
+
         return ['metadata' => $metadata, 'duration' => $duration, 'changed' => $changed];
+    }
+
+    /**
+     * Pure merge of incoming Mux video dimensions into the stored ones.
+     *
+     * Both sides must be positive; a lone width or height can't size a box,
+     * and a missing pair never clears stored dimensions.
+     *
+     * @param ?int $width current width in pixels
+     * @param ?int $height current height in pixels
+     * @param array $state incoming state (`width`, `height`)
+     * @return array{width: ?int, height: ?int, changed: bool}
+     *
+     * @author boccdotdev
+     * @since 2.3.0
+     */
+    public static function mergeMuxDimensions(?int $width, ?int $height, array $state): array
+    {
+        $incomingWidth = isset($state['width']) && is_numeric($state['width']) ? (int)$state['width'] : 0;
+        $incomingHeight = isset($state['height']) && is_numeric($state['height']) ? (int)$state['height'] : 0;
+
+        if ($incomingWidth <= 0 || $incomingHeight <= 0
+            || ($incomingWidth === $width && $incomingHeight === $height)
+        ) {
+            return ['width' => $width, 'height' => $height, 'changed' => false];
+        }
+
+        return ['width' => $incomingWidth, 'height' => $incomingHeight, 'changed' => true];
     }
 
     /**
