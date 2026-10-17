@@ -40,7 +40,7 @@ class RendererScriptsTest extends TestCase
         'jwplayer' => 'jwplayer-video-element@0',
         'twitch' => 'twitch-video-element@0',
         'cloudflare' => 'cloudflare-video-element@0',
-        'peertube' => 'peertube-video-element@0',
+        'peertube' => 'peertube-video-element@1',
         'videojs' => 'videojs-video-element@0',
     ];
 

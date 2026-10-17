@@ -6,6 +6,7 @@
 - Mux items now store the aspect ratio Mux reports (`metadata.aspectRatio`, e.g. `16:9`) and the video track's dimensions from import, upload, `sync-status`, and webhooks. New `craft.polymedia.aspectRatio(asset)` / `asset.getAspectRatio()` return it as a CSS `aspect-ratio` value (`16 / 9`) so templates can reserve the player's box before the video loads. Run `craft polymedia/mux/sync-status` to fill it in for existing items. ([#5](https://github.com/boccdotdev/polymedia/issues/5))
 
 ### Fixed
+- `scripts()` loaded PeerTube from `peertube-video-element@0`, which was never published. It now loads `@1`.
 - The GraphQL `width` and `height` fields always returned `null` because nothing stored them. Mux items now fill them.
 - A forced poster re-fetch (`PosterFetcher::fetchForItem(..., force: true)`) no longer fails with “A file with the name … already exists”. Poster filenames now include a hash of the image, so the replacement saves beside the old poster and gets a new URL that CDNs haven't cached. The replaced poster is deleted once the new one is attached, but only when it is a Polymedia-managed file in the item's sidecar folder that nothing else uses. ([#4](https://github.com/boccdotdev/polymedia/issues/4))
 
