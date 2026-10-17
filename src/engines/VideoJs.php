@@ -92,11 +92,12 @@ class VideoJs extends PlayerEngine
      * @var string Layout rules the packaged CSS doesn't cover. Zero specificity,
      * so site styles win. Skins are inline until defined, which ignores
      * `aspect-ratio`; `media-container` stays inline even once defined; iframe
-     * providers otherwise stay 300×150 inside a skin; standalone embeds need a
-     * block box to fill the width at their ratio.
+     * providers otherwise stay 300×150 inside a skin, and TikTok's 325×578
+     * minimum would overflow it; standalone embeds need a block box to fill
+     * the width at their ratio.
      */
     public const CSS = ':where(video-skin,video-neutral-skin,video-compat-skin,audio-skin,audio-neutral-skin,audio-compat-skin):not(:defined),:where(media-container){display:block}'
-        . ':where(video-skin,video-neutral-skin,video-compat-skin,media-container)>:where(youtube-video,vimeo-video,cloudflare-video,twitch-video,tiktok-video){display:block;width:100%;height:100%}'
+        . ':where(video-skin,video-neutral-skin,video-compat-skin,media-container)>:where(youtube-video,vimeo-video,cloudflare-video,twitch-video,tiktok-video){display:block;width:100%;height:100%;min-width:0;min-height:0}'
         . ':where(jwplayer-video,peertube-video,videojs-video){display:block;width:100%}';
 
     // Public Methods

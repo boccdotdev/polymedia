@@ -454,7 +454,7 @@ In none mode, load the files yourself and add these rules to your CSS. The first
 
 ```css
 :where(video-skin,video-neutral-skin,video-compat-skin,audio-skin,audio-neutral-skin,audio-compat-skin):not(:defined),:where(media-container){display:block}
-:where(video-skin,video-neutral-skin,video-compat-skin,media-container)>:where(youtube-video,vimeo-video,cloudflare-video,twitch-video,tiktok-video){display:block;width:100%;height:100%}
+:where(video-skin,video-neutral-skin,video-compat-skin,media-container)>:where(youtube-video,vimeo-video,cloudflare-video,twitch-video,tiktok-video){display:block;width:100%;height:100%;min-width:0;min-height:0}
 :where(jwplayer-video,peertube-video,videojs-video){display:block;width:100%}
 ```
 
