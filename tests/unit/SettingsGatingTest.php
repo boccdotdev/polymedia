@@ -97,6 +97,55 @@ class SettingsGatingTest extends TestCase
         $this->assertFalse($settings->validate(['videoUploadVolumeUids']));
     }
 
+    public function testVolumesWithACustomUploaderCantBeRouted(): void
+    {
+        if (\Yii::$app === null) {
+            new \yii\console\Application([
+                'id' => 'polymedia-tests',
+                'basePath' => dirname(__DIR__, 2),
+            ]);
+        }
+
+        $volume = function(string $uid, string $name, object $fs): \craft\models\Volume {
+            $volume = $this->createMock(\craft\models\Volume::class);
+            $volume->uid = $uid;
+            $volume->name = $name;
+            $volume->method('getFs')->willReturn($fs);
+
+            return $volume;
+        };
+        $byUid = [
+            'local' => $volume('local', 'Videos', $this->createMock(\craft\base\FsInterface::class)),
+            'cloud' => $volume('cloud', 'Cloud assets', $this->createMock(\craft\fs\Local::class)),
+        ];
+        $volumes = $this->createMock(\craft\services\Volumes::class);
+        $volumes->method('getVolumeByUid')->willReturnCallback(fn(string $uid) => $byUid[$uid] ?? null);
+        \Yii::$app->set('volumes', $volumes);
+
+        // Stand in for Craft Cloud's filesystem class, which isn't installed here.
+        $settings = new class() extends Settings {
+            public const CUSTOM_UPLOADER_FS_CLASSES = [\craft\fs\Local::class];
+        };
+        $settings->autoRouteVideoUploads = true;
+
+        try {
+            $settings->videoUploadVolumeUids = ['local'];
+            $this->assertTrue($settings->validate(['videoUploadVolumeUids']));
+
+            $settings->videoUploadVolumeUids = ['local', 'cloud'];
+            $this->assertFalse($settings->validate(['videoUploadVolumeUids']));
+            $this->assertStringStartsWith('Cloud assets uses a filesystem with its own uploader', $settings->getFirstError('videoUploadVolumeUids'));
+
+            // Routing off: the selection doesn't matter yet.
+            $settings->autoRouteVideoUploads = false;
+            $this->assertTrue($settings->validate(['videoUploadVolumeUids']));
+
+            $this->assertSame(['craft\\cloud\\fs\\AssetsFs'], Settings::CUSTOM_UPLOADER_FS_CLASSES);
+        } finally {
+            \Yii::$app->clear('volumes');
+        }
+    }
+
     public function testBunnySettingsValidation(): void
     {
         if (\Yii::$app === null) {

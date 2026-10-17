@@ -9,7 +9,7 @@
 - Optional signed Bunny Stream webhooks at `actions/polymedia/webhooks/bunny`, enabled by a **Bunny Webhook Verification Key** environment reference. ([#13](https://github.com/boccdotdev/polymedia/issues/13))
 - Optional deletion of the Bunny video when its `.pmedia` is permanently deleted, off by default. Trashing never deletes the video. ([#14](https://github.com/boccdotdev/polymedia/issues/14))
 - **Add media → From existing asset** (Lite) references a public MP4, WebM or MOV asset by UID without copying or owning it. Twig and GraphQL resolve the source's current URL. ([#15](https://github.com/boccdotdev/polymedia/issues/15))
-- Pro, opt-in **Automatically host uploaded MP4 videos** for selected volumes: new MP4s from Craft's standard uploader go to the hosting provider and land as `.pmedia` assets. Mixed batches keep Craft's queue behavior; if a routed volume's filesystem type has a custom uploader (such as Craft Cloud's), native uploads are disabled for every volume of that type rather than storing raw MP4s. ([#16](https://github.com/boccdotdev/polymedia/issues/16))
+- Pro, opt-in **Automatically host uploaded MP4 videos** for selected volumes: new MP4s from Craft's standard uploader go to the hosting provider and land as `.pmedia` assets. Mixed batches keep Craft's queue behavior; Craft Cloud volumes can't be routed because Cloud has its own uploader, and if another routed volume's filesystem type has a custom uploader, native uploads are disabled for every volume of that type rather than storing raw MP4s. ([#16](https://github.com/boccdotdev/polymedia/issues/16))
 - `scripts()` accepts a plain provider list, such as `scripts(['mux', 'bunny'])`.
 
 ### Changed

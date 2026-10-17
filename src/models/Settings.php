@@ -12,8 +12,11 @@
 namespace boccdotdev\polymedia\models;
 
 use boccdotdev\polymedia\services\Bunny;
+use Craft;
 use craft\base\Model;
 use craft\helpers\App;
+use craft\models\Volume;
+use craft\services\Volumes;
 
 /**
  * Plugin-wide settings for Polymedia.
@@ -93,6 +96,15 @@ class Settings extends Model
      * @since 2.5.0
      */
     public const ENV_REFERENCE_PATTERN = '/^\$[A-Za-z_][A-Za-z0-9_]*$/D';
+
+    /**
+     * @var string[] Filesystem classes known to register their own CP uploader.
+     * Routing can't split their uploads, and refusing them in the browser would
+     * disable native uploads on every volume of that type, so they can't be
+     * selected. Craft Cloud registers `Craft.CloudUploader` for its assets fs.
+     * @since 2.5.0
+     */
+    public const CUSTOM_UPLOADER_FS_CLASSES = ['craft\\cloud\\fs\\AssetsFs'];
 
     // Public Properties
     // =========================================================================
@@ -400,7 +412,8 @@ class Settings extends Model
 
     /**
      * Validates the automatic video upload volumes: at least one when routing
-     * is on, and never the sidecar volume.
+     * is on, never the sidecar volume, and none whose filesystem is known to
+     * use its own uploader.
      *
      * @param string $attribute `videoUploadVolumeUids`
      *
@@ -416,6 +429,46 @@ class Settings extends Model
         if ($this->sidecarVolumeUid && in_array($this->sidecarVolumeUid, $this->videoUploadVolumeUids, true)) {
             $this->addError($attribute, 'The sidecar volume cannot be used for automatic video uploads.');
         }
+
+        $volumes = Craft::$app->get('volumes', false);
+
+        if (!$this->autoRouteVideoUploads || !$volumes instanceof Volumes) {
+            return;
+        }
+
+        foreach ($this->videoUploadVolumeUids as $uid) {
+            $volume = $volumes->getVolumeByUid((string)$uid);
+
+            if ($volume && self::usesCustomUploader($volume)) {
+                $this->addError($attribute, "{$volume->name} uses a filesystem with its own uploader, such as Craft Cloud's, so its MP4 uploads can't be routed. Use Upload video for it instead.");
+            }
+        }
+    }
+
+    /**
+     * Returns whether a volume's filesystem is known to use its own CP uploader.
+     *
+     * @param Volume $volume the volume
+     * @return bool
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public static function usesCustomUploader(Volume $volume): bool
+    {
+        try {
+            $fs = $volume->getFs();
+        } catch (\Throwable) {
+            return false;
+        }
+
+        foreach (static::CUSTOM_UPLOADER_FS_CLASSES as $class) {
+            if (is_a($fs, $class)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
