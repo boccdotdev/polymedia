@@ -228,6 +228,10 @@ class ManifestWriter extends Component
     /**
      * Updates the manifest file and DB record for an existing `.pmedia` asset.
      *
+     * `metadata` replaces the stored metadata as a whole, so lists such as MP4
+     * renditions can shrink; callers pass the complete merged metadata. Other
+     * keys merge recursively.
+     *
      * @param Asset $asset the `.pmedia` asset
      * @param array $changes key-value pairs to merge into the manifest
      * @throws \Throwable if the update fails
@@ -239,6 +243,10 @@ class ManifestWriter extends Component
     {
         $current = $this->read($asset);
         $updated = array_replace_recursive($current, $changes);
+
+        if (array_key_exists('metadata', $changes)) {
+            $updated['metadata'] = $changes['metadata'];
+        }
         $json = Json::encode($updated, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 
         $volume = $asset->getVolume();
