@@ -90,11 +90,12 @@ class VideoJs extends PlayerEngine
 
     /**
      * @var string Layout rules the packaged CSS doesn't cover. Zero specificity,
-     * so site styles win. Undefined skins are inline, which ignores
-     * `aspect-ratio`; iframe providers otherwise stay 300×150 inside a skin;
-     * standalone embeds need a block box to fill the width at their ratio.
+     * so site styles win. Skins are inline until defined, which ignores
+     * `aspect-ratio`; `media-container` stays inline even once defined; iframe
+     * providers otherwise stay 300×150 inside a skin; standalone embeds need a
+     * block box to fill the width at their ratio.
      */
-    public const CSS = ':where(video-skin,video-neutral-skin,video-compat-skin,audio-skin,audio-neutral-skin,audio-compat-skin,media-container):not(:defined){display:block}'
+    public const CSS = ':where(video-skin,video-neutral-skin,video-compat-skin,audio-skin,audio-neutral-skin,audio-compat-skin):not(:defined),:where(media-container){display:block}'
         . ':where(video-skin,video-neutral-skin,video-compat-skin,media-container)>:where(youtube-video,vimeo-video,cloudflare-video,twitch-video,tiktok-video){display:block;width:100%;height:100%}'
         . ':where(jwplayer-video,peertube-video,videojs-video){display:block;width:100%}';
 
@@ -110,7 +111,7 @@ class VideoJs extends PlayerEngine
 
         // Standalone providers use their own UI, so there's nothing to translate.
         if (in_array($context->type, self::STANDALONE_TYPES, true)) {
-            $attrs = $this->_boxAttributes($options) + $this->_mediaAttributes($context, true);
+            $attrs = $this->_boxAttributes($options) + $this->_mediaAttributes($context, true, true);
             $aspectRatio = $this->_aspectRatio($context);
 
             if ($aspectRatio !== null) {
@@ -121,8 +122,9 @@ class VideoJs extends PlayerEngine
         }
 
         $children = (string)($options['children'] ?? '');
+        $custom = $children !== '';
         $kind = $context->isAudio ? 'audio' : 'video';
-        $boxTag = $children !== '' ? 'media-container' : $this->_skin($options['skin'] ?? null)[$kind];
+        $boxTag = $custom ? 'media-container' : $this->_skin($options['skin'] ?? null)[$kind];
 
         $boxAttrs = $this->_boxAttributes($options);
         $aspectRatio = $this->_aspectRatio($context);
@@ -141,7 +143,8 @@ class VideoJs extends PlayerEngine
 
         $html = Html::beginTag("{$kind}-player", $playerAttrs)
             . Html::beginTag($boxTag, $boxAttrs)
-            . $this->_media($context, $this->_mediaAttributes($context, false), true)
+            // Without a skin there's no poster layer, so the media element shows it.
+            . $this->_media($context, $this->_mediaAttributes($context, false, $custom), true)
             . $children
             . Html::endTag($boxTag)
             . Html::endTag("{$kind}-player");
@@ -154,7 +157,7 @@ class VideoJs extends PlayerEngine
      */
     public function element(RenderContext $context): string
     {
-        return $this->_media($context, $this->_mediaAttributes($context, true), false);
+        return $this->_media($context, $this->_mediaAttributes($context, true, true), false);
     }
 
     /**
@@ -245,11 +248,11 @@ class VideoJs extends PlayerEngine
      * Builds the media element attributes.
      *
      * @param RenderContext $context the resolved item
-     * @param bool $standalone whether the element renders without a player,
-     *        which means native controls and its own poster
+     * @param bool $controls whether to emit native `controls` (no player UI)
+     * @param bool $poster whether the element shows the poster itself (no skin)
      * @return array<string, mixed>
      */
-    private function _mediaAttributes(RenderContext $context, bool $standalone): array
+    private function _mediaAttributes(RenderContext $context, bool $controls, bool $poster): array
     {
         $manifest = $context->manifest;
         $providerId = (string)($manifest['providerId'] ?? '');
@@ -260,14 +263,14 @@ class VideoJs extends PlayerEngine
                 : ($manifest['url'] ?? ''),
         ];
 
-        $attrs += $this->playbackAttributes($context->settings, $standalone);
+        $attrs += $this->playbackAttributes($context->settings, $controls);
 
         // Mux timeline thumbnails are cross-origin images.
         if ($context->type === 'mux') {
             $attrs['crossorigin'] ??= 'anonymous';
         }
 
-        if ($standalone && $context->poster !== null && !$context->isAudio) {
+        if ($poster && $context->poster !== null && !$context->isAudio) {
             $attrs['poster'] = $context->poster;
         }
 
