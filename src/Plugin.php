@@ -960,6 +960,11 @@ class Plugin extends BasePlugin
             return;
         }
 
+        // Hosted videos keep their provider identity.
+        if ($this->getEditorContent()->isManagedVideo($record)) {
+            return;
+        }
+
         $newType = $request->getBodyParam('polymediaType');
         $urlChanged = false;
 
@@ -1179,7 +1184,8 @@ class Plugin extends BasePlugin
     }
 
     /**
-     * Registers the CP asset bundle on CP requests and passes Mux feature flags.
+     * Registers the CP asset bundle on CP requests and passes non-secret
+     * video hosting feature flags.
      */
     private function _registerCpAssets(): void
     {
@@ -1196,22 +1202,22 @@ class Plugin extends BasePlugin
                 $view->registerTranslations('polymedia', [
                     'Add media',
                     'From URL',
-                    'Paste a YouTube, Vimeo, Mux, HLS, or other media URL',
-                    'Browse Mux library',
-                    'Import a video already in your Mux account',
-                    'Upload to Mux',
-                    'Upload a video file directly to Mux',
+                    'Paste a YouTube, Vimeo, HLS, or other media URL',
+                    'Browse video library',
+                    'Import a video from your video library',
+                    'Upload video',
+                    'Upload a video file to your video library',
                     'Add media URL',
                     'Media item created.',
                     'Import',
                     'In Craft',
-                    'Loading Mux library…',
-                    'No Mux assets found.',
+                    'Loading video library…',
+                    'No videos found.',
                     'Search videos',
                     'No videos match your search.',
                     'Search is limited to the {count} most recent videos.',
-                    'Could not load Mux library.',
-                    'Mux media imported.',
+                    'Could not load video library.',
+                    'Video imported.',
                     'Already in Craft — using existing media item.',
                     'Previous',
                     'Next',
@@ -1236,8 +1242,9 @@ class Plugin extends BasePlugin
                 ]);
                 $view->registerJs(
                     'window.CraftPolymediaConfig = ' . Json::encode([
-                        'muxEnabled' => $this->isVideoProviderEnabled(Settings::PROVIDER_MUX),
                         'isPro' => $this->getIsPro(),
+                        'videoProvider' => $this->getSettings()->videoProvider,
+                        'videoEnabled' => $this->getVideoEnabled(),
                     ]) . ';',
                     View::POS_HEAD,
                 );

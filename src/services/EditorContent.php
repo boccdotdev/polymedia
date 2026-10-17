@@ -65,14 +65,20 @@ class EditorContent extends Component
             $typeOptions[] = ['label' => ucfirst($type), 'value' => $type];
         }
 
-        $html = '';
+        // Hosted videos are identified by their provider, so authors can't
+        // retarget them; the URL and type become read-only details.
+        $managed = $this->isManagedVideo($record);
+        $html = $managed
+            ? Html::beginTag('details', ['class' => 'polymedia-technical-details'])
+                . Html::tag('summary', Craft::t('polymedia', 'Technical details'))
+            : '';
 
         $html .= Cp::textFieldHtml([
             'label' => Craft::t('polymedia', 'Media URL'),
             'id' => 'polymedia-url',
             'name' => 'polymediaUrl',
             'value' => $record->url,
-            'disabled' => $static,
+            'disabled' => $static || $managed,
         ]);
 
         $html .= Cp::selectFieldHtml([
@@ -81,7 +87,7 @@ class EditorContent extends Component
             'name' => 'polymediaType',
             'value' => $record->type,
             'options' => $typeOptions,
-            'disabled' => $static,
+            'disabled' => $static || $managed,
         ]);
 
         if ($record->providerId) {
@@ -95,8 +101,12 @@ class EditorContent extends Component
             ]);
         }
 
-        if ($record->type === 'mux') {
-            $html .= $this->_renderMuxStatus($record);
+        if ($managed) {
+            $html .= Html::endTag('details');
+        }
+
+        if (in_array($record->type, ['mux', 'bunny'], true)) {
+            $html .= $this->_renderHostedStatus($record);
         }
 
         if ($record->duration) {
@@ -143,6 +153,24 @@ class EditorContent extends Component
     }
 
     /**
+     * Whether an item is a managed video whose URL and type authors can't edit.
+     *
+     * Covers Mux and Bunny library imports and uploads.
+     *
+     * @param MediaItemRecord $record the media item
+     * @return bool
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function isManagedVideo(MediaItemRecord $record): bool
+    {
+        $metadata = MediaItems::decodeMetadataJson($record->metadata);
+
+        return !empty($metadata['muxAssetId']) || !empty($metadata['bunnyVideoId']);
+    }
+
+    /**
      * Human-readable Mux processing status label for CP display.
      *
      * @param string $status Mux asset status (`preparing`, `ready`, `errored`, …)
@@ -157,6 +185,7 @@ class EditorContent extends Component
             'ready' => Craft::t('polymedia', 'Ready'),
             'preparing' => Craft::t('polymedia', 'Processing'),
             'errored' => Craft::t('polymedia', 'Errored'),
+            'deleted' => Craft::t('polymedia', 'Deleted'),
             default => $status !== '' ? $status : Craft::t('polymedia', 'Unknown'),
         };
     }
@@ -287,18 +316,31 @@ class EditorContent extends Component
     // =========================================================================
 
     /**
-     * Light Mux status + asset id summary for the asset editor.
+     * Processing status and remote ID summary for a hosted video.
      *
-     * @param MediaItemRecord $record
+     * @param MediaItemRecord $record a mux- or bunny-type item
      * @return string
      */
-    private function _renderMuxStatus(MediaItemRecord $record): string
+    private function _renderHostedStatus(MediaItemRecord $record): string
     {
         $metadata = Plugin::getInstance()->getMediaItems()->getMetadata($record);
-        $status = isset($metadata['muxStatus']) ? (string)$metadata['muxStatus'] : '';
-        $muxAssetId = isset($metadata['muxAssetId']) ? (string)$metadata['muxAssetId'] : '';
+        $isBunny = $record->type === 'bunny';
 
-        if ($status === '' && $muxAssetId === '') {
+        if ($isBunny) {
+            $status = isset($metadata['bunnyStatus']) ? Bunny::mapStatus((int)$metadata['bunnyStatus']) : '';
+            $remoteId = (string)($metadata['bunnyVideoId'] ?? '');
+            $idLabel = Craft::t('polymedia', 'Video ID');
+            $instructions = Craft::t('polymedia', 'Status is stored when the item is imported or uploaded. Refresh with `polymedia/bunny/sync` or by re-importing from the video library.');
+        } else {
+            $status = isset($metadata['muxStatus']) ? (string)$metadata['muxStatus'] : '';
+            $remoteId = (string)($metadata['muxAssetId'] ?? '');
+            $idLabel = Craft::t('polymedia', 'Asset ID');
+            $instructions = Plugin::getInstance()->getMux()->getWebhookSecret() !== ''
+                ? Craft::t('polymedia', 'Status updates automatically via Mux webhooks.')
+                : Craft::t('polymedia', 'Status is stored when the item is imported or uploaded. Refresh with `polymedia/mux/sync-status` or by re-importing from the Mux library.');
+        }
+
+        if ($status === '' && $remoteId === '') {
             return '';
         }
 
@@ -308,7 +350,7 @@ class EditorContent extends Component
         $html = Html::beginTag('div', [
             'class' => 'field polymedia-mux-status-field',
         ]);
-        $html .= Html::tag('div', Craft::t('polymedia', 'Mux'), ['class' => 'heading']);
+        $html .= Html::tag('div', $isBunny ? Craft::t('polymedia', 'Bunny Stream') : Craft::t('polymedia', 'Mux'), ['class' => 'heading']);
         $html .= Html::beginTag('div', ['class' => 'input']);
 
         if ($label !== '') {
@@ -317,25 +359,18 @@ class EditorContent extends Component
                 Html::encode($label),
                 [
                     'class' => "polymedia-mux-status-badge is-{$token}",
-                    'title' => Craft::t('polymedia', 'Mux processing status'),
+                    'title' => Craft::t('polymedia', 'Video processing status'),
                 ],
             );
         }
 
-        if ($muxAssetId !== '') {
+        if ($remoteId !== '') {
             $html .= Html::tag(
                 'div',
-                Craft::t('polymedia', 'Asset ID') . ': ' . Html::encode($muxAssetId),
+                $idLabel . ': ' . Html::encode($remoteId),
                 ['class' => 'light', 'style' => 'margin-top: 6px;'],
             );
         }
-
-        $instructions = Plugin::getInstance()->getMux()->getWebhookSecret() !== ''
-            ? Craft::t('polymedia', 'Status updates automatically via Mux webhooks.')
-            : Craft::t(
-                'polymedia',
-                'Status is stored when the item is imported or uploaded. Refresh with `polymedia/mux/sync-status` or by re-importing from the Mux library.',
-            );
 
         $html .= Html::tag(
             'p',

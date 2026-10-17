@@ -9,14 +9,19 @@
 namespace boccdotdev\polymedia\tests\unit;
 
 use boccdotdev\polymedia\console\controllers\BunnyController as BunnyConsoleController;
+use boccdotdev\polymedia\controllers\BunnyController;
+use boccdotdev\polymedia\controllers\MuxController;
 use boccdotdev\polymedia\models\Settings;
 use boccdotdev\polymedia\Plugin;
 use boccdotdev\polymedia\records\MediaItemRecord;
 use boccdotdev\polymedia\services\Bunny;
 use boccdotdev\polymedia\services\BunnySync;
+use boccdotdev\polymedia\services\EditorContent;
 use boccdotdev\polymedia\services\MediaItems;
+use boccdotdev\polymedia\services\Mux;
 use Craft;
 use PHPUnit\Framework\TestCase;
+use yii\web\Response;
 
 /**
  * Bunny credential resolution and the provider management gates.
@@ -51,6 +56,9 @@ class BunnyGatingTest extends TestCase
     {
         $this->_previousApp = Craft::$app;
         Craft::$app = $this->getMockBuilder(\craft\web\Application::class)->disableOriginalConstructor()->getMock();
+        $i18n = $this->createMock(\craft\i18n\I18N::class);
+        $i18n->method('translate')->willReturnArgument(1);
+        Craft::$app->method('getI18n')->willReturn($i18n);
         $this->_settings = new Settings([
             'bunnyLibraryId' => '133',
             'bunnyCdnHostname' => 'vz-example.b-cdn.net',
@@ -110,6 +118,55 @@ class BunnyGatingTest extends TestCase
         self::assertFalse($this->_plugin->isVideoProviderEnabled('unknown'));
     }
 
+    public function testBunnyActionsRequireCpJsonAndProBeforeRemoteCalls(): void
+    {
+        foreach (['actionLibrary' => false, 'actionImport' => true] as $action => $write) {
+            $this->_bunnyController($write, 'pro_required')->$action();
+        }
+    }
+
+    public function testBunnyConfigurationAndSelectionAreSeparateGates(): void
+    {
+        $this->_plugin->pro = true;
+        $this->_bunnyController(false, 'not_configured')->actionLibrary();
+
+        $this->_plugin->bunny = true;
+        $this->_bunnyController(true, 'inactive_provider')->actionImport();
+    }
+
+    public function testMuxActionsRefuseWhenBunnyIsSelected(): void
+    {
+        $this->_plugin->pro = true;
+        $this->_plugin->mux = true;
+        $this->_settings->videoProvider = Settings::PROVIDER_BUNNY;
+        $mux = $this->createMock(Mux::class);
+        $mux->method('isConfigured')->willReturn(true);
+        $mux->expects(self::never())->method('listAssets');
+        $this->_plugin->muxService = $mux;
+
+        $controller = $this->getMockBuilder(MuxController::class)->disableOriginalConstructor()
+            ->onlyMethods(['requireCpRequest', 'requireAcceptsJson', 'asFailure'])->getMock();
+        $controller->expects(self::once())->method('asFailure')
+            ->with(self::isType('string'), ['code' => 'inactive_provider'])
+            ->willReturn(new Response(['charset' => 'UTF-8']));
+        $controller->actionLibrary();
+    }
+
+    public function testHostedImportsAreManagedVideos(): void
+    {
+        $editor = new EditorContent();
+
+        foreach ([['muxAssetId' => 'a'], ['bunnyVideoId' => 'b']] as $metadata) {
+            $record = $this->createMock(MediaItemRecord::class);
+            $record->method('__get')->willReturnCallback(fn(string $name) => $name === 'metadata' ? json_encode($metadata) : null);
+            self::assertTrue($editor->isManagedVideo($record));
+        }
+
+        $pasted = $this->createMock(MediaItemRecord::class);
+        $pasted->method('__get')->willReturn(null);
+        self::assertFalse($editor->isManagedVideo($pasted), 'A pasted Mux URL stays editable.');
+    }
+
     public function testConsoleSyncRequiresProAndConfiguration(): void
     {
         $controller = $this->getMockBuilder(BunnyConsoleController::class)->disableOriginalConstructor()
@@ -150,6 +207,26 @@ class BunnyGatingTest extends TestCase
 
         self::assertSame(\yii\console\ExitCode::TEMPFAIL, $controller->actionSync());
     }
+
+    // Private Methods
+    // =========================================================================
+
+    /**
+     * Returns a Bunny controller that expects one gate failure.
+     */
+    private function _bunnyController(bool $write, string $code): BunnyController
+    {
+        $controller = $this->getMockBuilder(BunnyController::class)->disableOriginalConstructor()
+            ->onlyMethods(['requireCpRequest', 'requireAcceptsJson', 'requirePostRequest', 'asFailure'])->getMock();
+        $controller->expects(self::once())->method('requireCpRequest');
+        $controller->expects(self::once())->method('requireAcceptsJson');
+        $controller->expects($write ? self::once() : self::never())->method('requirePostRequest');
+        $controller->expects(self::once())->method('asFailure')
+            ->with(self::isType('string'), self::callback(fn(array $data) => $data['code'] === $code))
+            ->willReturn(new Response(['charset' => 'UTF-8']));
+
+        return $controller;
+    }
 }
 
 /**
@@ -162,6 +239,16 @@ class BunnyGatingPlugin extends Plugin
 {
     // Public Properties
     // =========================================================================
+
+    /**
+     * @var bool whether the edition is Pro
+     */
+    public bool $pro = false;
+
+    /**
+     * @var ?Mux
+     */
+    public ?Mux $muxService = null;
 
     /**
      * @var bool whether Mux is enabled
@@ -194,6 +281,16 @@ class BunnyGatingPlugin extends Plugin
     public function getSettings(): Settings
     {
         return $this->testSettings;
+    }
+
+    public function getIsPro(): bool
+    {
+        return $this->pro;
+    }
+
+    public function getMux(): Mux
+    {
+        return $this->muxService ?? parent::getMux();
     }
 
     public function getMuxEnabled(): bool

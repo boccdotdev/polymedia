@@ -419,6 +419,12 @@ class MuxController extends Controller
             $asset = Craft::$app->getAssets()->getAssetById((int)$existing->assetId);
 
             if ($asset) {
+                $user = Craft::$app->getUser()->getIdentity();
+
+                if (!$user || !$asset->canView($user)) {
+                    return $this->asFailure(Craft::t('polymedia', 'You cannot access the existing media item.'));
+                }
+
                 // Re-import refreshes stored status/duration and the poster.
                 try {
                     if (!$mediaItems->applyMuxAssetState($muxAssetId, $muxAsset, $existing)) {
