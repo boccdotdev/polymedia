@@ -12,6 +12,7 @@
 namespace boccdotdev\polymedia\models;
 
 use craft\base\Model;
+use craft\helpers\App;
 
 /**
  * Plugin-wide settings for Polymedia.
@@ -23,6 +24,33 @@ use craft\base\Model;
  */
 class Settings extends Model
 {
+    // Const Properties
+    // =========================================================================
+
+    /**
+     * @var string Media Chrome player engine.
+     * @since 2.4.0
+     */
+    public const ENGINE_MEDIA_CHROME = 'media-chrome';
+
+    /**
+     * @var string Video.js v10 player engine.
+     * @since 2.4.0
+     */
+    public const ENGINE_VIDEOJS = 'videojs';
+
+    /**
+     * @var string[] Every player engine handle.
+     * @since 2.4.0
+     */
+    public const ENGINES = [self::ENGINE_MEDIA_CHROME, self::ENGINE_VIDEOJS];
+
+    /**
+     * @var string[] Video.js skin handles.
+     * @since 2.4.0
+     */
+    public const VIDEOJS_SKINS = ['default', 'neutral', 'compat'];
+
     // Public Properties
     // =========================================================================
 
@@ -45,9 +73,32 @@ class Settings extends Model
     public ?string $sidecarVolumeUid = null;
 
     /**
+     * @var string Front-end player engine, `media-chrome` or `videojs`. Supports
+     * env syntax (`$POLYMEDIA_PLAYER_ENGINE`) so one environment can trial
+     * Video.js. The two engines can't share a page, so this applies site-wide.
+     * Holds the raw value; read the active engine with {@see getPlayerEngine()}.
+     * @since 2.4.0
+     */
+    public string $playerEngine = self::ENGINE_MEDIA_CHROME;
+
+    /**
      * @var string Media Chrome major version for the `scripts()` helper.
      */
     public string $mediaChromeVersion = '4';
+
+    /**
+     * @var string Exact Video.js version for the `scripts()` helper. CDN entry
+     * files import content-hashed chunks, so it can't be a version range.
+     * @since 2.4.0
+     */
+    public string $videojsVersion = '10.1.0';
+
+    /**
+     * @var string Default Video.js skin: `default`, `neutral` or `compat`.
+     * Templates can override it per player with the `skin` option.
+     * @since 2.4.0
+     */
+    public string $videojsSkin = 'default';
 
     /**
      * @var array Default providers to include when `scripts()` is called without arguments.
@@ -140,14 +191,66 @@ class Settings extends Model
     // =========================================================================
 
     /**
+     * Returns the active player engine, resolving an environment variable.
+     *
+     * Falls back to Media Chrome when the resolved value isn't a known engine,
+     * so a missing or mistyped variable never breaks rendering.
+     *
+     * @return string one of {@see ENGINES}
+     *
+     * @author boccdotdev
+     * @since 2.4.0
+     */
+    public function getPlayerEngine(): string
+    {
+        $engine = App::parseEnv($this->playerEngine);
+
+        return in_array($engine, self::ENGINES, true) ? $engine : self::ENGINE_MEDIA_CHROME;
+    }
+
+    /**
+     * Validates that the player engine is a known engine or an environment
+     * variable that resolves to one.
+     *
+     * @param string $attribute the attribute being validated
+     *
+     * @author boccdotdev
+     * @since 2.4.0
+     */
+    public function validatePlayerEngine(string $attribute): void
+    {
+        $value = (string)$this->$attribute;
+        $resolved = App::parseEnv($value);
+
+        if (in_array($resolved, self::ENGINES, true)) {
+            return;
+        }
+
+        // An unset variable is allowed; another environment may define it.
+        if ($resolved === null && preg_match('/^\$[A-Za-z_][A-Za-z0-9_]*$/', $value)) {
+            return;
+        }
+
+        $this->addError($attribute, 'Enter media-chrome or videojs, or an environment variable set to one of them.');
+    }
+
+    /**
      * @inheritdoc
      */
     protected function defineRules(): array
     {
         $rules = parent::defineRules();
 
-        $rules[] = [['mediaChromeVersion', 'scriptLoaderMode', 'cdnHost'], 'required'];
+        $rules[] = [['mediaChromeVersion', 'scriptLoaderMode', 'cdnHost', 'playerEngine', 'videojsVersion', 'videojsSkin'], 'required'];
         $rules[] = [['mediaChromeVersion', 'cdnHost', 'muxTokenId', 'muxTokenSecret', 'muxWebhookSecret'], 'string'];
+        $rules[] = [['playerEngine'], 'validatePlayerEngine'];
+        $rules[] = [['videojsSkin'], 'in', 'range' => self::VIDEOJS_SKINS];
+        $rules[] = [
+            ['videojsVersion'],
+            'match',
+            'pattern' => '/^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$/',
+            'message' => "Use an exact version such as 10.1.0. Video.js CDN files can't be loaded from a version range.",
+        ];
         $rules[] = [
             ['muxTokenId', 'muxTokenSecret', 'muxWebhookSecret'],
             'match',
