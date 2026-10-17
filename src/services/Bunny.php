@@ -43,6 +43,12 @@ class Bunny extends Component
     public const API_BASE = 'https://video.bunnycdn.com';
 
     /**
+     * @var string The tus endpoint for resumable browser uploads.
+     * @since 2.5.0
+     */
+    public const TUS_ENDPOINT = self::API_BASE . '/tusupload';
+
+    /**
      * @var array Guzzle options for anonymous CDN probes.
      */
     private const CDN_OPTIONS = [
@@ -421,6 +427,93 @@ class Bunny extends Component
             'isPublic' => null,
             'playbackPolicy' => null,
             'mp4Renditions' => [],
+        ];
+    }
+
+    /**
+     * Returns the upload signature Bunny's tus endpoint expects.
+     *
+     * @param string $libraryId the library ID
+     * @param string $key the library API key
+     * @param int $expires the signature expiry as a Unix timestamp
+     * @param string $videoId the video ID
+     * @return string
+     * @throws \InvalidArgumentException when either ID is invalid
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public static function uploadSignature(string $libraryId, string $key, int $expires, string $videoId): string
+    {
+        return hash('sha256', self::validateLibraryId($libraryId) . $key . $expires . self::validateVideoId($videoId));
+    }
+
+    /**
+     * Creates a video and a short-lived signature for a browser tus upload.
+     *
+     * The browser gets the signature, never the API key.
+     *
+     * @param string $title the video title
+     * @param array $options optional `expiresIn` seconds (300 to 86400)
+     * @return array{uploadId: string, videoId: string, uploadUrl: string, status: string, headers: array<string, string>}
+     * @throws \RuntimeException when Bunny isn't configured, the request fails or Bunny returns another library's video
+     * @throws \InvalidArgumentException when Bunny returns an invalid video ID
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function createDirectUpload(string $title = '', array $options = []): array
+    {
+        $video = $this->_api('POST', '/videos', ['json' => [
+            'title' => trim($title) !== '' ? trim($title) : 'Untitled video',
+        ]]);
+        $id = self::validateVideoId((string)($video['guid'] ?? ''));
+
+        if (isset($video['videoLibraryId']) && (string)$video['videoLibraryId'] !== $this->getLibraryId()) {
+            throw new \RuntimeException('Bunny returned a video from another library.');
+        }
+
+        $expires = time() + max(300, min(86400, (int)($options['expiresIn'] ?? 86400)));
+
+        return [
+            'uploadId' => $id,
+            'videoId' => $id,
+            'uploadUrl' => self::TUS_ENDPOINT,
+            'status' => 'waiting',
+            'headers' => [
+                'AuthorizationSignature' => self::uploadSignature($this->getLibraryId(), $this->getApiKey(), $expires, $id),
+                'AuthorizationExpire' => (string)$expires,
+                'LibraryId' => $this->getLibraryId(),
+                'VideoId' => $id,
+            ],
+        ];
+    }
+
+    /**
+     * Returns an uploaded video's processing state for polling.
+     *
+     * Ready means encoded and publicly playable. MP4 files aren't checked
+     * while polling.
+     *
+     * @param string $videoId the video ID
+     * @return array the {@see getAsset()} state plus `uploadId`, `ready`, `failed` and `message`
+     * @throws \RuntimeException when Bunny isn't configured, the request fails or the CDN is temporarily unavailable
+     * @throws \InvalidArgumentException when the ID is invalid
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function getUpload(string $videoId): array
+    {
+        $asset = $this->getAsset($videoId, discoverMp4: false);
+
+        return $asset + [
+            'uploadId' => $videoId,
+            'ready' => $asset['status'] === 'ready' && $asset['isPublic'] === true,
+            'failed' => in_array($asset['status'], ['errored', 'deleted'], true) || $asset['isPublic'] === false,
+            'message' => $asset['isPublic'] === false
+                ? 'Anonymous native HLS playback is unavailable. Token, referrer and DRM protected libraries are not supported.'
+                : null,
         ];
     }
 

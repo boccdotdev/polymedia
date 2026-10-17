@@ -387,7 +387,7 @@ test('video import and upload keep their dialogs open and withhold success on re
     if (kind === 'import') {
       s.picker.VideoBrowseModal._import.call(modal, { assetId: 'mux-id' }, button);
     } else {
-      s.picker.VideoUploadModal._complete.call(modal, 'mux-id');
+      s.picker.VideoUploadModal._complete.call(modal, { assetId: 42 });
     }
     await new Promise(setImmediate);
     assert.equal(hidden, false);
@@ -452,4 +452,25 @@ test('Bunny import sends videoId and keeps field-selection refusal protection', 
   assert.equal(imported.muxAssetId, undefined);
   assert.equal(s.notices.length, 0);
   assert.equal(s.errors.length, 1);
+});
+
+test('explicit upload refuses a full field before any provider request', () => {
+  const s = setup({ selected: [1], limit: 1 });
+  s.Craft.PolymediaVideoUpload = assert.fail;
+  s.picker.VideoUploadModal.startUpload.call({
+    assetIndex: s.index, $file: [{ files: [{ name: 'video.mp4' }] }],
+  });
+  assert.equal(s.errors.length, 1);
+  assert.equal(s.requests.length, 0);
+});
+
+test('upload context carries the picker field and owner element', () => {
+  const s = setup();
+  s.input.settings = { fieldId: 7, sourceElementId: 8 };
+  s.index.currentFolderId = 4;
+  const context = s.picker.uploadContext(s.index);
+  assert.equal(context.folderId, 4);
+  assert.equal(context.siteId, 2);
+  assert.equal(context.fieldId, 7);
+  assert.equal(context.elementId, 8);
 });

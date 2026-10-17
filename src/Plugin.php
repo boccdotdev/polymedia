@@ -37,6 +37,7 @@ use boccdotdev\polymedia\services\Renderer;
 use boccdotdev\polymedia\services\SidecarStorage;
 use boccdotdev\polymedia\services\ThumbnailDeriver;
 use boccdotdev\polymedia\services\UrlDetector;
+use boccdotdev\polymedia\services\VideoUploads;
 use boccdotdev\polymedia\variables\PolymediaVariable;
 use boccdotdev\polymedia\web\assets\cp\PolymediaAsset;
 use Craft;
@@ -93,6 +94,7 @@ use yii\base\Event;
  * @property-read Mux $mux
  * @property-read Bunny $bunny
  * @property-read BunnySync $bunnySync
+ * @property-read VideoUploads $videoUploads
  * @property-read PosterFetcher $posterFetcher
  * @property-read SidecarStorage $sidecarStorage
  *
@@ -172,6 +174,7 @@ class Plugin extends BasePlugin
             'mux' => Mux::class,
             'bunny' => Bunny::class,
             'bunnySync' => BunnySync::class,
+            'videoUploads' => VideoUploads::class,
             'posterFetcher' => PosterFetcher::class,
             'sidecarStorage' => SidecarStorage::class,
         ]);
@@ -431,6 +434,19 @@ class Plugin extends BasePlugin
     public function getBunnySync(): BunnySync
     {
         return $this->get('bunnySync');
+    }
+
+    /**
+     * Returns the hosted video upload authorization service.
+     *
+     * @return VideoUploads
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function getVideoUploads(): VideoUploads
+    {
+        return $this->get('videoUploads');
     }
 
     /**
@@ -1231,9 +1247,9 @@ class Plugin extends BasePlugin
                     'No file chosen',
                     'Start upload',
                     'Uploading…',
-                    'Processing on Mux…',
-                    'Creating media item…',
-                    'Mux upload complete.',
+                    'Video upload complete.',
+                    'Processing video…',
+                    'The field cannot accept another media item.',
                     'Upload failed.',
                     'Upload cancelled.',
                     'Choose a video file.',

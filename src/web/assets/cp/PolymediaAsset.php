@@ -17,7 +17,7 @@ use craft\web\assets\cp\CpAsset;
 /**
  * CP asset bundle for Polymedia.
  *
- * Bundles the JS and CSS for the Assets “Add media” disclosure and Mux modals
+ * Bundles the JS and CSS for the Assets “Add media” disclosure and video modals
  * and modal on the asset element index.
  *
  * @author boccdotdev
@@ -41,6 +41,8 @@ class PolymediaAsset extends AssetBundle
 
         $this->js = [
             'upchunk.js',
+            'tus.js',
+            'video-upload.js',
             'polymedia.js',
         ];
 

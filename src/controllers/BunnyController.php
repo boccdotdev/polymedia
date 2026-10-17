@@ -20,7 +20,7 @@ use yii\web\ForbiddenHttpException;
 use yii\web\Response;
 
 /**
- * CP JSON actions for the Bunny Stream library: browse and import.
+ * CP JSON actions for the Bunny Stream library: browse, import and direct upload.
  *
  * Every action requires Pro, a configured library and Bunny as the selected
  * hosting provider. Remote IDs are always scoped to the configured library.
@@ -131,6 +131,113 @@ class BunnyController extends Controller
                 'redirectUrl' => $asset->getCpEditUrl(),
             ],
         );
+    }
+
+    /**
+     * Creates a Bunny video and a signed tus upload for an authorized context.
+     *
+     * @return Response
+     * @throws BadRequestHttpException when the request isn't a CP JSON POST
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function actionCreateUpload(): Response
+    {
+        $denied = $this->_guard(true);
+
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        $plugin = Plugin::getInstance();
+        $title = trim((string)Craft::$app->getRequest()->getBodyParam('title', ''));
+
+        try {
+            $upload = $plugin->getVideoUploads()->createUpload(
+                Settings::PROVIDER_BUNNY,
+                fn(): array => $plugin->getBunny()->createDirectUpload($title),
+            );
+        } catch (ForbiddenHttpException | BadRequestHttpException | \RuntimeException | \InvalidArgumentException $e) {
+            return $this->asFailure($e->getMessage());
+        }
+
+        return $this->asSuccess(data: $upload + ['title' => $title]);
+    }
+
+    /**
+     * Returns an authorized upload's processing state.
+     *
+     * @return Response
+     * @throws BadRequestHttpException when the request isn't a CP JSON POST
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function actionUploadStatus(): Response
+    {
+        $denied = $this->_guard(true);
+
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        $plugin = Plugin::getInstance();
+        $uploadId = (string)Craft::$app->getRequest()->getBodyParam('uploadId', '');
+
+        try {
+            $plugin->getVideoUploads()->completeUpload(Settings::PROVIDER_BUNNY, $uploadId);
+
+            return $this->asSuccess(data: $plugin->getBunny()->getUpload($uploadId));
+        } catch (ForbiddenHttpException | BadRequestHttpException | \RuntimeException | \InvalidArgumentException $e) {
+            return $this->asFailure($e->getMessage());
+        }
+    }
+
+    /**
+     * Imports a finished upload into its authorized folder.
+     *
+     * @return Response
+     * @throws BadRequestHttpException when the request isn't a CP JSON POST
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function actionCompleteUpload(): Response
+    {
+        $denied = $this->_guard(true);
+
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        $plugin = Plugin::getInstance();
+        $request = Craft::$app->getRequest();
+        $uploadId = (string)$request->getBodyParam('uploadId', '');
+        $user = Craft::$app->getUser()->getIdentity();
+
+        try {
+            $context = $plugin->getVideoUploads()->completeUpload(Settings::PROVIDER_BUNNY, $uploadId);
+            $folder = Craft::$app->getAssets()->getFolderById((int)$context['folderId']);
+
+            if (!$user || !$folder) {
+                throw new \RuntimeException('The upload destination no longer exists. Import the video from the video library instead.');
+            }
+
+            $result = $plugin->getBunnySync()->importVideo($uploadId, $folder, $user, (string)$request->getBodyParam('title', ''));
+            $plugin->getVideoUploads()->assertSelectable($context, $result['asset']);
+        } catch (ForbiddenHttpException | BadRequestHttpException | \RuntimeException | \InvalidArgumentException $e) {
+            return $this->asFailure($e->getMessage());
+        }
+
+        $asset = $result['asset'];
+
+        return $this->asSuccess(Craft::t('polymedia', 'Video upload complete.'), [
+            'assetId' => $asset->id,
+            'filename' => $asset->getFilename(),
+            'reused' => $result['reused'],
+            'redirectUrl' => $asset->getCpEditUrl(),
+        ]);
     }
 
     // Private Methods

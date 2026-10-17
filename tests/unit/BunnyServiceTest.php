@@ -250,6 +250,51 @@ class BunnyServiceTest extends TestCase
         }
     }
 
+    public function testDirectUploadHasSignedTusHeadersButNoApiKey(): void
+    {
+        $service = $this->_service([new Response(200, [], json_encode($this->_video()))]);
+        $upload = $service->createDirectUpload('Title');
+
+        self::assertSame(Bunny::TUS_ENDPOINT, $upload['uploadUrl']);
+        self::assertSame(self::VIDEO, $upload['uploadId']);
+        self::assertSame(
+            hash('sha256', '133server-secret' . $upload['headers']['AuthorizationExpire'] . self::VIDEO),
+            $upload['headers']['AuthorizationSignature'],
+        );
+        self::assertStringNotContainsString('server-secret', json_encode($upload));
+        self::assertSame('server-secret', $this->_history[0]['request']->getHeaderLine('AccessKey'));
+        self::assertSame('https://video.bunnycdn.com/library/133/videos', (string)$this->_history[0]['request']->getUri());
+        self::assertSame('{"title":"Title"}', (string)$this->_history[0]['request']->getBody());
+        self::assertFalse($this->_history[0]['options']['allow_redirects']);
+        self::assertLessThanOrEqual(time() + 86400, (int)$upload['headers']['AuthorizationExpire']);
+    }
+
+    public function testDirectUploadRejectsAnotherLibrarysVideo(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->_service([new Response(200, [], json_encode($this->_video(['videoLibraryId' => 134])))])->createDirectUpload();
+    }
+
+    public function testUploadPollingStates(): void
+    {
+        $waiting = $this->_service([new Response(200, [], json_encode($this->_video())), new Response(404)])->getUpload(self::VIDEO);
+        self::assertFalse($waiting['ready'], 'The CDN may lag the encoder.');
+        self::assertFalse($waiting['failed']);
+
+        $failed = $this->_service([new Response(200, [], json_encode($this->_video(['status' => 6])))])->getUpload(self::VIDEO);
+        self::assertTrue($failed['failed']);
+        self::assertFalse($failed['ready']);
+
+        $protected = $this->_service([new Response(200, [], json_encode($this->_video())), new Response(403)])->getUpload(self::VIDEO);
+        self::assertTrue($protected['failed']);
+        self::assertNotNull($protected['message']);
+
+        $this->_history = [];
+        $ready = $this->_service([new Response(200, [], json_encode($this->_video())), new Response(200, [], "#EXTM3U\n#EXTINF:10,\nsegment.ts\n")]);
+        self::assertTrue($ready->getUpload(self::VIDEO)['ready']);
+        self::assertCount(2, $this->_history, 'Polling never checks MP4 files.');
+    }
+
     public function testMergePreservesEditorMetadataAndIsIdempotent(): void
     {
         $state = $this->_service()->mapVideo($this->_video());

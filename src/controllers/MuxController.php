@@ -144,23 +144,14 @@ class MuxController extends Controller
         }
 
         $plugin = Plugin::getInstance();
-        $request = Craft::$app->getRequest();
-        $title = trim((string)$request->getBodyParam('title', ''));
-        $folderId = (int)$request->getBodyParam('folderId') ?: null;
+        $title = trim((string)Craft::$app->getRequest()->getBodyParam('title', ''));
 
-        $settings = $plugin->getSettings();
-        $currentUser = Craft::$app->getUser()->getIdentity();
-        $folder = $plugin->getManifestWriter()->resolveFolder($folderId, $currentUser, $settings);
-
-        if (!$folder) {
-            return $this->asFailure(Craft::t(
-                'polymedia',
-                'Choose a writable library volume for media. The sidecar volume cannot contain media manifests.',
-            ));
-        }
-
+        // The upload context (from video-uploads/preflight) fixes the folder.
         try {
-            $upload = $plugin->getMux()->createDirectUpload($title);
+            $upload = $plugin->getVideoUploads()->createUpload(
+                Settings::PROVIDER_MUX,
+                fn(): array => $plugin->getMux()->createDirectUpload($title),
+            );
         } catch (\Throwable $e) {
             return $this->asFailure($e->getMessage());
         }
@@ -176,7 +167,7 @@ class MuxController extends Controller
             'uploadId' => $upload['uploadId'],
             'uploadUrl' => $upload['uploadUrl'],
             'status' => $upload['status'],
-            'folderId' => (int)$folder->id,
+            'folderId' => (int)$upload['folderId'],
             'title' => $title,
         ]);
     }
@@ -184,7 +175,7 @@ class MuxController extends Controller
     /**
      * Polls a Mux direct upload until an asset id (and preferably playback id) is available.
      *
-     * Accepts POST (preferred, body `uploadId`) or GET query `uploadId`.
+     * Requires a POST with the `uploadId` and the `uploadContext` that created it.
      *
      * @return Response
      *
@@ -194,6 +185,7 @@ class MuxController extends Controller
     public function actionUploadStatus(): Response
     {
         $this->requireCpRequest();
+        $this->requirePostRequest();
         $this->requireAcceptsJson();
 
         $denied = $this->_denyUnlessMuxEnabled();
@@ -202,12 +194,7 @@ class MuxController extends Controller
             return $denied;
         }
 
-        $request = Craft::$app->getRequest();
-        $uploadId = trim((string)(
-            $request->getBodyParam('uploadId')
-            ?? $request->getQueryParam('uploadId')
-            ?? ''
-        ));
+        $uploadId = trim((string)Craft::$app->getRequest()->getBodyParam('uploadId', ''));
 
         if ($uploadId === '') {
             return $this->asFailure(Craft::t('polymedia', 'Upload id is required.'));
@@ -216,6 +203,7 @@ class MuxController extends Controller
         $plugin = Plugin::getInstance();
 
         try {
+            $plugin->getVideoUploads()->completeUpload(Settings::PROVIDER_MUX, $uploadId);
             $upload = $plugin->getMux()->getUpload($uploadId);
         } catch (\Throwable $e) {
             return $this->asFailure($e->getMessage());
@@ -268,7 +256,8 @@ class MuxController extends Controller
     /**
      * Completes a Mux upload by creating/reusing a `.pmedia` asset.
      *
-     * Accepts either `muxAssetId` or `uploadId` (resolved to an asset id).
+     * The `uploadId` must belong to the posted `uploadContext`; the Mux asset
+     * is resolved from it, and the `.pmedia` lands in the context's folder.
      *
      * @return Response
      *
@@ -288,44 +277,51 @@ class MuxController extends Controller
         }
 
         $request = Craft::$app->getRequest();
-        $muxAssetId = trim((string)$request->getBodyParam('muxAssetId', ''));
         $uploadId = trim((string)$request->getBodyParam('uploadId', ''));
-        $folderId = (int)$request->getBodyParam('folderId') ?: null;
         $titleOverride = trim((string)$request->getBodyParam('title', ''));
+        $plugin = Plugin::getInstance();
 
-        if ($muxAssetId === '' && $uploadId !== '') {
-            try {
-                $upload = Plugin::getInstance()->getMux()->getUpload($uploadId);
-            } catch (\Throwable $e) {
-                return $this->asFailure($e->getMessage());
-            }
-
-            $muxAssetId = (string)($upload['assetId'] ?? '');
-
-            if ($muxAssetId === '') {
-                return $this->asFailure(Craft::t(
-                    'polymedia',
-                    'Mux has not created an asset for this upload yet. Keep polling.',
-                ));
-            }
+        try {
+            $context = $plugin->getVideoUploads()->completeUpload(Settings::PROVIDER_MUX, $uploadId);
+            $upload = $plugin->getMux()->getUpload($uploadId);
+        } catch (\Throwable $e) {
+            return $this->asFailure($e->getMessage());
         }
+
+        $muxAssetId = (string)($upload['assetId'] ?? '');
 
         if ($muxAssetId === '') {
             return $this->asFailure(Craft::t(
                 'polymedia',
-                'Mux asset id or upload id is required.',
+                'Mux has not created an asset for this upload yet. Keep polling.',
             ));
         }
 
         // New Mux asset exists now — make it searchable without waiting out the TTL.
-        Plugin::getInstance()->getMux()->invalidateLibrarySnapshot();
+        $plugin->getMux()->invalidateLibrarySnapshot();
 
-        return $this->_respondFromMuxAssetId(
+        $response = $this->_respondFromMuxAssetId(
             $muxAssetId,
-            $folderId,
+            (int)$context['folderId'],
             $titleOverride,
-            Craft::t('polymedia', 'Mux upload complete.'),
+            Craft::t('polymedia', 'Video upload complete.'),
         );
+        $assetId = is_array($response->data) ? (int)($response->data['assetId'] ?? 0) : 0;
+        $asset = $assetId ? Craft::$app->getAssets()->getAssetById($assetId) : null;
+
+        if (!$asset) {
+            return $response;
+        }
+
+        try {
+            $plugin->getVideoUploads()->assertSelectable($context, $asset);
+        } catch (\Throwable $e) {
+            return $this->asFailure($e->getMessage());
+        }
+
+        $response->data['filename'] = $asset->getFilename();
+
+        return $response;
     }
 
     // Private Methods
