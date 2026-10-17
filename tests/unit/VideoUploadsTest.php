@@ -348,6 +348,111 @@ class VideoUploadsTest extends TestCase
         $this->uploads->completeUpload('mux', 'remote-1');
     }
 
+    public function testExplicitUploadDoesNotNeedRoutingOrAnMp4(): void
+    {
+        $result = $this->uploads->preflight(['folderId' => 20, 'filename' => 'film.mov']);
+
+        self::assertTrue($result['route']);
+        self::assertArrayHasKey('token', $result);
+    }
+
+    public function testRoutingSignsSelectedVolumesAndLeavesOthersNative(): void
+    {
+        $this->_enableRouting();
+
+        self::assertTrue($this->start(['routing' => true])['route']);
+        self::assertSame(['provider' => 'mux', 'folderId' => 20, 'route' => false], $this->uploads->preflight([
+            'routing' => true, 'folderId' => 20, 'filename' => 'FILM.MP4',
+        ]));
+    }
+
+    public static function routingFailures(): array
+    {
+        return [
+            'opted out' => [10, 'film.mp4', false, true],
+            'not an mp4' => [10, 'film.mov', true, true],
+            'unknown folder' => [999, 'film.mp4', true, true],
+            'no folder' => [0, 'film.mp4', true, true],
+            'not writable' => [20, 'film.mp4', true, false],
+            'sidecar' => [30, 'film.mp4', true, true],
+        ];
+    }
+
+    #[DataProvider('routingFailures')]
+    public function testInvalidRoutingNeverFallsBackToNative(int $folder, string $filename, bool $enabled, bool $writable): void
+    {
+        $this->_enableRouting();
+        $this->settings->autoRouteVideoUploads = $enabled;
+        $this->writable = $writable;
+
+        $this->expectException(ForbiddenHttpException::class);
+        $this->uploads->preflight(['routing' => true, 'folderId' => $folder, 'filename' => $filename]);
+    }
+
+    public static function revokedRouting(): array
+    {
+        return [['opt in'], ['volumes']];
+    }
+
+    #[DataProvider('revokedRouting')]
+    public function testRoutedCompletionRechecksRouting(string $change): void
+    {
+        $this->_enableRouting();
+        $this->start(['routing' => true]);
+        $this->uploads->createUpload('mux', static fn() => ['uploadId' => 'remote-1']);
+
+        match ($change) {
+            'opt in' => $this->settings->autoRouteVideoUploads = false,
+            'volumes' => $this->settings->videoUploadVolumeUids = [],
+        };
+
+        $this->expectException(ForbiddenHttpException::class);
+        $this->uploads->completeUpload('mux', 'remote-1');
+    }
+
+    public static function nativeDestinationFailures(): array
+    {
+        return ['uploads disabled' => ['uploads'], 'volume excluded' => ['source'], 'outside root' => ['location']];
+    }
+
+    #[DataProvider('nativeDestinationFailures')]
+    public function testNativeDestinationStillRequiresFieldAuthorization(string $failure): void
+    {
+        $this->_enableRouting();
+        $field = $this->field(10, native: $failure === 'uploads');
+        $field->sources = ['volume:ordinary'];
+
+        match ($failure) {
+            'uploads' => $field->allowUploads = false,
+            'source' => $field->sources = ['volume:videos'],
+            'location' => $field->restrictLocation = true,
+        };
+
+        $this->expectException(ForbiddenHttpException::class);
+        $this->uploads->preflight(['routing' => true, 'filename' => 'film.mp4', 'folderId' => 20, 'fieldId' => 7]);
+    }
+
+    public function testNativeOnlyFieldUploadsNativelyWithoutPolymediaKind(): void
+    {
+        $this->_enableRouting();
+        $field = $this->field(native: true);
+        $field->sources = ['volume:ordinary'];
+        $field->allowedKinds = ['video'];
+
+        self::assertSame(['provider' => 'mux', 'folderId' => 20, 'route' => false], $this->uploads->preflight([
+            'routing' => true, 'filename' => 'film.mp4', 'folderId' => 20, 'fieldId' => 7,
+        ]));
+    }
+
+    public function testRoutedUploadNeedsANativeFieldThatAllowsUploads(): void
+    {
+        $this->_enableRouting();
+        $this->field(native: true)->allowUploads = false;
+
+        $this->expectException(ForbiddenHttpException::class);
+        $this->start(['routing' => true, 'fieldId' => 7]);
+    }
+
     // Protected Methods
     // =========================================================================
 
@@ -389,6 +494,15 @@ class VideoUploadsTest extends TestCase
 
     // Private Methods
     // =========================================================================
+
+    /**
+     * Turns on routing for the `videos` volume.
+     */
+    private function _enableRouting(): void
+    {
+        $this->settings->autoRouteVideoUploads = true;
+        $this->settings->videoUploadVolumeUids = ['videos'];
+    }
 
     /**
      * Re-signs the posted context with changes.

@@ -287,6 +287,21 @@ class Settings extends Model
      */
     public bool $deleteBunnyAssetOnDelete = false;
 
+    /**
+     * @var bool Pro opt-in: route new MP4 uploads from Craft's standard
+     * uploader to the selected provider, for the volumes in
+     * {@see $videoUploadVolumeUids}. Never implied by configuring a provider.
+     * @since 2.5.0
+     */
+    public bool $autoRouteVideoUploads = false;
+
+    /**
+     * @var string[] UIDs of the volumes whose new MP4 uploads are routed. An
+     * empty list routes nothing; the sidecar volume can't be included.
+     * @since 2.5.0
+     */
+    public array $videoUploadVolumeUids = [];
+
     // Public Methods
     // =========================================================================
 
@@ -384,6 +399,26 @@ class Settings extends Model
     }
 
     /**
+     * Validates the automatic video upload volumes: at least one when routing
+     * is on, and never the sidecar volume.
+     *
+     * @param string $attribute `videoUploadVolumeUids`
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function validateVideoUploadVolumes(string $attribute): void
+    {
+        if ($this->autoRouteVideoUploads && $this->videoUploadVolumeUids === []) {
+            $this->addError($attribute, 'Select at least one volume for automatic video uploads.');
+        }
+
+        if ($this->sidecarVolumeUid && in_array($this->sidecarVolumeUid, $this->videoUploadVolumeUids, true)) {
+            $this->addError($attribute, 'The sidecar volume cannot be used for automatic video uploads.');
+        }
+    }
+
+    /**
      * @inheritdoc
      */
     protected function defineRules(): array
@@ -418,6 +453,8 @@ class Settings extends Model
         $rules[] = [['bunnyLibraryId', 'bunnyCdnHostname'], 'validateBunnyConnection'];
         $rules[] = [['videoProvider'], 'in', 'range' => self::VIDEO_PROVIDERS];
         $rules[] = [['muxDefaultPlaybackFormat', 'bunnyDefaultPlaybackFormat'], 'in', 'range' => self::PLAYBACK_FORMATS];
+        $rules[] = [['videoUploadVolumeUids'], 'each', 'rule' => ['string', 'max' => 36]];
+        $rules[] = [['videoUploadVolumeUids'], 'validateVideoUploadVolumes', 'skipOnEmpty' => false];
         $rules[] = [['selfHostBaseUrl'], 'string'];
         $rules[] = [['defaultVolumeUid', 'attachmentsVolumeUid', 'sidecarVolumeUid'], 'string', 'max' => 36];
         $rules[] = [
@@ -441,6 +478,7 @@ class Settings extends Model
                 'warnOnSignedUrlInPublicVolume',
                 'deleteMuxAssetOnDelete',
                 'deleteBunnyAssetOnDelete',
+                'autoRouteVideoUploads',
             ],
             'boolean',
         ];

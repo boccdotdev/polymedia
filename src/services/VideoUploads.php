@@ -31,6 +31,11 @@ use yii\web\ForbiddenHttpException;
  * Creating the remote upload and completing it both require that context,
  * and re-check permissions. The context holds no provider credentials.
  *
+ * Covers the explicit Upload video action and, with routing on, new MP4s
+ * from Craft's standard uploader. A routed MP4 bound for a volume that isn't
+ * selected for routing gets an explicit `route: false` and uploads natively;
+ * any failure is an error, never a native fallback.
+ *
  * @author boccdotdev
  * @since 2.5.0
  */
@@ -55,8 +60,11 @@ class VideoUploads extends Component
     /**
      * Authorizes an upload to the selected provider and returns its context.
      *
-     * @param array $input request input: `folderId`, `fieldId`, `elementId`, `siteId`
-     * @return array{provider: string, folderId: int, token: string}
+     * @param array $input request input: `folderId`, `fieldId`, `elementId`,
+     *                     `siteId`, and for native routing `routing` and `filename`
+     * @return array{provider: string, folderId: int, route: bool, token?: string}
+     *         `route` is false only for a routed upload to a volume that
+     *         isn't selected for routing, which then uploads natively
      * @throws ForbiddenHttpException when the provider, destination or field refuses the upload
      * @throws BadRequestHttpException when the field isn't an Assets field
      *
@@ -65,11 +73,24 @@ class VideoUploads extends Component
      */
     public function preflight(array $input): array
     {
-        $provider = Plugin::getInstance()->getSettings()->videoProvider;
+        $settings = Plugin::getInstance()->getSettings();
+        $provider = $settings->videoProvider;
         $this->_requireProvider($provider);
+        $routing = filter_var($input['routing'] ?? false, FILTER_VALIDATE_BOOL);
+
+        if ($routing && (!$settings->autoRouteVideoUploads || !self::isMp4((string)($input['filename'] ?? '')))) {
+            throw new ForbiddenHttpException('Automatic video uploads are not enabled for this request.');
+        }
 
         [$folder, $field, $owner] = $this->_destination($input);
-        $this->_checkField($field, $owner, $folder, $provider);
+        $this->_checkFieldLocation($field, $owner, $folder, $routing);
+
+        // A deliberate native destination, not recovery from a failure.
+        if ($routing && !in_array($folder->getVolume()->uid, $settings->videoUploadVolumeUids, true)) {
+            return ['provider' => $provider, 'folderId' => (int)$folder->id, 'route' => false];
+        }
+
+        $this->_checkField($field, $owner, $folder, $provider, $routing);
 
         $context = [
             'version' => self::VERSION,
@@ -79,6 +100,7 @@ class VideoUploads extends Component
             'fieldId' => $field?->id,
             'elementId' => $owner?->id,
             'siteId' => $owner->siteId ?? ((int)($input['siteId'] ?? 0) ?: null),
+            'routing' => $routing,
             'expires' => time() + self::LIFETIME,
             'nonce' => bin2hex(random_bytes(16)),
         ];
@@ -86,6 +108,7 @@ class VideoUploads extends Component
         return [
             'provider' => $provider,
             'folderId' => (int)$folder->id,
+            'route' => true,
             'token' => base64_encode(Craft::$app->getSecurity()->hashData(Json::encode($context))),
         ];
     }
@@ -198,6 +221,20 @@ class VideoUploads extends Component
     }
 
     /**
+     * Returns whether a file name is an MP4.
+     *
+     * @param string $filename the file name
+     * @return bool
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public static function isMp4(string $filename): bool
+    {
+        return strtolower(pathinfo($filename, PATHINFO_EXTENSION)) === 'mp4';
+    }
+
+    /**
      * Validates a decoded upload context. Pure function, exposed for tests.
      *
      * @param array $context the decoded context
@@ -258,8 +295,15 @@ class VideoUploads extends Component
             throw new ForbiddenHttpException('The video upload destination cannot be changed.');
         }
 
+        $settings = Plugin::getInstance()->getSettings();
         [$folder, $field, $owner] = $this->_destination($context);
-        $this->_checkField($field, $owner, $folder, $provider);
+        $routing = !empty($context['routing']);
+
+        if ($routing && (!$settings->autoRouteVideoUploads || !in_array($folder->getVolume()->uid, $settings->videoUploadVolumeUids, true))) {
+            throw new ForbiddenHttpException('Automatic video uploads are no longer enabled for this volume.');
+        }
+
+        $this->_checkField($field, $owner, $folder, $provider, $routing);
 
         return $context;
     }
@@ -283,7 +327,7 @@ class VideoUploads extends Component
      * An explicit folder that's invalid or not writable is refused, never
      * swapped for another volume.
      *
-     * @param array $input `folderId`, `fieldId`, `elementId`, `siteId`
+     * @param array $input `folderId`, `fieldId`, `elementId`, `siteId`, `routing`
      * @return array{0: VolumeFolder, 1: ?AssetsField, 2: ?ElementInterface}
      * @throws ForbiddenHttpException when the user can't upload there
      * @throws BadRequestHttpException when the field isn't an Assets field
@@ -323,7 +367,7 @@ class VideoUploads extends Component
 
         if ($folderId > 0) {
             $folder = Craft::$app->getAssets()->getFolderById($folderId);
-        } elseif ($fieldId === 0) {
+        } elseif ($fieldId === 0 && empty($input['routing'])) {
             $folder = $plugin->getManifestWriter()->resolveFolder(null, $user, $plugin->getSettings());
         } else {
             $folder = null;
@@ -347,15 +391,16 @@ class VideoUploads extends Component
      * @param ?ElementInterface $owner the element that owns the field
      * @param VolumeFolder $folder the destination folder
      * @param string $provider the provider
+     * @param bool $routing whether this is a routed native upload
      * @throws ForbiddenHttpException when the field refuses the upload
      */
-    private function _checkField(?AssetsField $field, ?ElementInterface $owner, VolumeFolder $folder, string $provider): void
+    private function _checkField(?AssetsField $field, ?ElementInterface $owner, VolumeFolder $folder, string $provider, bool $routing = false): void
     {
         if (!$field) {
             return;
         }
 
-        $this->_checkFieldLocation($field, $owner, $folder);
+        $this->_checkFieldLocation($field, $owner, $folder, $routing);
 
         if ($field->restrictFiles && !in_array('polymedia', $field->allowedKinds ?? [], true)) {
             throw new ForbiddenHttpException('This field must allow the Polymedia file kind before videos can be uploaded into it.');
@@ -371,15 +416,26 @@ class VideoUploads extends Component
     }
 
     /**
-     * Requires the folder to be within the field's upload location or sources.
+     * Requires the folder to be within the field's upload location or sources,
+     * and a routed native upload to a field that allows uploads.
      *
-     * @param AssetsField $field the field
+     * @param ?AssetsField $field the field, when uploading into one
      * @param ?ElementInterface $owner the element that owns the field
      * @param VolumeFolder $folder the destination folder
+     * @param bool $routing whether this is a routed native upload
      * @throws ForbiddenHttpException when the folder is outside the field's reach
      */
-    private function _checkFieldLocation(AssetsField $field, ?ElementInterface $owner, VolumeFolder $folder): void
+    private function _checkFieldLocation(?AssetsField $field, ?ElementInterface $owner, VolumeFolder $folder, bool $routing = false): void
     {
+        if (!$field) {
+            return;
+        }
+
+        // Polymedia fields only offer native upload when routing applies.
+        if ($routing && !$field->allowUploads && !$field instanceof PolymediaField) {
+            throw new ForbiddenHttpException('Uploads are disabled for this field.');
+        }
+
         if ($field->restrictLocation) {
             $rootId = (int)$field->resolveDynamicPathToFolderId($owner);
             $candidate = $folder;

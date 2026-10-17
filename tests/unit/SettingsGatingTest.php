@@ -72,6 +72,31 @@ class SettingsGatingTest extends TestCase
         $this->assertSame('hls', $settings->getDefaultPlaybackFormat('mux'));
     }
 
+    public function testRoutingIsOffByDefaultAndNeedsOrdinaryVolumes(): void
+    {
+        if (\Yii::$app === null) {
+            new \yii\console\Application([
+                'id' => 'polymedia-tests',
+                'basePath' => dirname(__DIR__, 2),
+            ]);
+        }
+
+        $settings = new Settings();
+        $this->assertFalse($settings->autoRouteVideoUploads);
+        $this->assertSame([], $settings->videoUploadVolumeUids);
+        $this->assertFalse($settings->deleteBunnyAssetOnDelete);
+        $this->assertTrue($settings->validate(['videoUploadVolumeUids']));
+
+        $settings->autoRouteVideoUploads = true;
+        $this->assertFalse($settings->validate(['videoUploadVolumeUids']));
+
+        $settings->videoUploadVolumeUids = ['video-volume'];
+        $this->assertTrue($settings->validate(['videoUploadVolumeUids']));
+
+        $settings->sidecarVolumeUid = 'video-volume';
+        $this->assertFalse($settings->validate(['videoUploadVolumeUids']));
+    }
+
     public function testBunnySettingsValidation(): void
     {
         if (\Yii::$app === null) {

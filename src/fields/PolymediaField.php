@@ -68,6 +68,8 @@ class PolymediaField extends Assets
     {
         $config['restrictFiles'] = true;
         $config['allowedKinds'] = ['polymedia'];
+        // Stored off; native upload is decided per render by automatic
+        // routing, so field config never depends on edition or credentials.
         $config['allowUploads'] = false;
 
         if (!isset($config['id'])) {
@@ -80,6 +82,53 @@ class PolymediaField extends Assets
         }
 
         parent::__construct($config);
+    }
+
+    /**
+     * Returns whether the field offers native upload for an element: only when
+     * new MP4s to its upload folder are routed to a provider it allows.
+     *
+     * @param ?ElementInterface $element the element being edited
+     * @return bool
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function getRoutesUploads(?ElementInterface $element): bool
+    {
+        $plugin = Plugin::getInstance();
+        $settings = $plugin->getSettings();
+
+        if (!$settings->autoRouteVideoUploads || $settings->videoUploadVolumeUids === [] || !$plugin->getVideoEnabled()) {
+            return false;
+        }
+
+        if ($this->allowedProviders !== [] && !in_array($settings->videoProvider, $this->allowedProviders, true)) {
+            return false;
+        }
+
+        try {
+            $folder = Craft::$app->getAssets()->getFolderById($this->resolveDynamicPathToFolderId($element));
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return $folder !== null && in_array($folder->getVolume()->uid, $settings->videoUploadVolumeUids, true);
+    }
+
+    /**
+     * @inheritdoc
+     */
+    protected function inputHtml(mixed $value, ?ElementInterface $element, bool $inline): string
+    {
+        $original = $this->allowUploads;
+        $this->allowUploads = $this->getRoutesUploads($element);
+
+        try {
+            return parent::inputHtml($value, $element, $inline);
+        } finally {
+            $this->allowUploads = $original;
+        }
     }
 
     /**

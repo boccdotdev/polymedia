@@ -1,0 +1,10 @@
+{
+  "name": "polymedia-upload-tests",
+  "private": true,
+  "description": "Real jQuery and blueimp transport tests for Craft video upload routing",
+  "devDependencies": {
+    "blueimp-file-upload": "10.32.0",
+    "jquery": "3.7.1",
+    "jsdom": "26.1.0"
+  }
+}

@@ -89,6 +89,11 @@
       );
 
       var place = function () {
+        // Native video routing reads the index's destination from its uploader.
+        if (assetIndex.$uploadButton) {
+          assetIndex.$uploadButton.data('polymediaIndex', assetIndex);
+        }
+
         if (assetIndex.settings && assetIndex.settings.context === 'index') {
           // Assets index: immediately before Craft’s Upload files button.
           var $upload = assetIndex.$uploadButton;
@@ -131,8 +136,8 @@
 
       place();
 
-      if (assetIndex.settings && assetIndex.settings.context === 'index') {
-        // Craft rebuilds the upload button on source change — re-place ours.
+      if (typeof assetIndex.on === 'function') {
+        // Craft rebuilds the upload button on source change, in indexes and pickers.
         assetIndex.on('selectSource', place);
       }
 

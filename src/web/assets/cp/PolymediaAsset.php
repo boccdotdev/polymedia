@@ -43,6 +43,7 @@ class PolymediaAsset extends AssetBundle
             'upchunk.js',
             'tus.js',
             'video-upload.js',
+            'native-video-routing.js',
             'polymedia.js',
         ];
 

@@ -49,7 +49,10 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Picker regression tests
+      - name: Install JS test dependencies
+        run: npm ci --prefix tests/js --ignore-scripts
+
+      - name: CP JavaScript regression tests
         run: composer test-js
 
       - name: Easy Coding Standard

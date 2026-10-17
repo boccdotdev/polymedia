@@ -1272,6 +1272,20 @@ class Plugin extends BasePlugin
             View::EVENT_BEFORE_RENDER_TEMPLATE,
             function() {
                 $view = Craft::$app->getView();
+                $settings = $this->getSettings();
+                $routing = $this->getVideoEnabled() && $settings->autoRouteVideoUploads;
+                $routingFsTypes = [];
+
+                // Filesystem types of the routed volumes, so the CP can refuse
+                // a custom uploader there instead of storing raw MP4s.
+                if ($routing) {
+                    foreach (Craft::$app->getVolumes()->getAllVolumes() as $volume) {
+                        if (in_array($volume->uid, $settings->videoUploadVolumeUids, true)) {
+                            $routingFsTypes[] = get_class($volume->getFs());
+                        }
+                    }
+                }
+
                 $view->registerAssetBundle(PolymediaAsset::class);
                 $view->registerTranslations('polymedia', [
                     'Add media',
@@ -1281,6 +1295,8 @@ class Plugin extends BasePlugin
                     'Import a video from your video library',
                     'Upload video',
                     'Upload a video file to your video library',
+                    'Automatic video routing is unavailable for this filesystem. Use Upload video to send videos to the video library.',
+                    'Native uploads are disabled for this custom filesystem because it was selected for automatic video routing. Remove its volumes from automatic routing, or use Upload video.',
                     'From existing asset',
                     'Use a video asset without changing the original file',
                     'Could not create media item.',
@@ -1320,8 +1336,11 @@ class Plugin extends BasePlugin
                 $view->registerJs(
                     'window.CraftPolymediaConfig = ' . Json::encode([
                         'isPro' => $this->getIsPro(),
-                        'videoProvider' => $this->getSettings()->videoProvider,
+                        'videoProvider' => $settings->videoProvider,
                         'videoEnabled' => $this->getVideoEnabled(),
+                        'autoRouteVideoUploads' => $routing,
+                        'videoUploadVolumeUids' => $routing ? array_values($settings->videoUploadVolumeUids) : [],
+                        'videoUploadFsTypes' => array_values(array_unique($routingFsTypes)),
                     ]) . ';',
                     View::POS_HEAD,
                 );

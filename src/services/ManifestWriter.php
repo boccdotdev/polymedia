@@ -43,9 +43,10 @@ class ManifestWriter extends Component
     /**
      * Resolves a writable library destination for every manifest creation flow.
      *
-     * Explicit sidecar destinations are rejected, never silently redirected.
-     * Otherwise prefer the current folder, configured default, then the first
-     * writable ordinary volume. Sidecars are not a manifest destination.
+     * An explicit folder that's missing, not writable or in the sidecar volume
+     * is rejected, never redirected to another volume. Without one, prefer the
+     * configured default, then the first writable ordinary volume. Sidecars
+     * are not a manifest destination.
      */
     public function resolveFolder(?int $folderId, ?User $user, Settings $settings): ?VolumeFolder
     {
@@ -75,6 +76,8 @@ class ManifestWriter extends Component
             if ($folder && isset($writable[(int)$folder->volumeId])) {
                 return $folder;
             }
+
+            return null;
         }
 
         foreach ($writable as $volume) {
