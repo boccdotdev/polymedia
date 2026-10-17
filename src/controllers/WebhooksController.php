@@ -12,6 +12,7 @@
 namespace boccdotdev\polymedia\controllers;
 
 use boccdotdev\polymedia\Plugin;
+use boccdotdev\polymedia\services\Bunny;
 use boccdotdev\polymedia\services\Mux;
 use Craft;
 use craft\helpers\Json;
@@ -21,7 +22,7 @@ use yii\web\NotFoundHttpException;
 use yii\web\Response;
 
 /**
- * Receives Mux webhook deliveries and applies asset state.
+ * Receives Mux and Bunny Stream webhook deliveries and applies video state.
  *
  * A signature-checking shell around
  * {@see \boccdotdev\polymedia\services\MediaItems::applyMuxAssetState()} — the
@@ -42,7 +43,7 @@ class WebhooksController extends Controller
     /**
      * @inheritdoc
      */
-    protected array|bool|int $allowAnonymous = ['mux'];
+    protected array|bool|int $allowAnonymous = ['mux', 'bunny'];
 
     /**
      * @inheritdoc
@@ -154,6 +155,75 @@ class WebhooksController extends Controller
     }
 
     /**
+     * Handles a Bunny Stream webhook delivery.
+     *
+     * The payload only says which video changed; its status code is a
+     * notification enum, not video state. A valid delivery for an imported
+     * video refreshes it from the Stream API through
+     * {@see \boccdotdev\polymedia\services\BunnySync::syncVideo()}. Unknown
+     * videos and other libraries are acknowledged and ignored; transient
+     * sync failures answer 503 so Bunny retries.
+     *
+     * @return Response
+     * @throws NotFoundHttpException when no verification key is configured
+     * @throws BadRequestHttpException when the request isn't a POST
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function actionBunny(): Response
+    {
+        $this->requirePostRequest();
+
+        $plugin = Plugin::getInstance();
+        $bunny = $plugin->getBunny();
+        $key = $bunny->getWebhookKey();
+
+        if ($key === '' || !$plugin->getBunnyEnabled()) {
+            // No key, no endpoint: never accept unsigned payloads.
+            throw new NotFoundHttpException();
+        }
+
+        $request = Craft::$app->getRequest();
+        $body = (string)$request->getRawBody();
+        $headers = $request->getHeaders();
+
+        if (!Bunny::verifyWebhookSignature(
+            $body,
+            (string)$headers->get('X-BunnyStream-Signature', ''),
+            (string)$headers->get('X-BunnyStream-Signature-Version', ''),
+            (string)$headers->get('X-BunnyStream-Signature-Algorithm', ''),
+            $key,
+        )) {
+            Craft::warning('Rejected Bunny Stream webhook delivery: invalid signature.', __METHOD__);
+
+            return $this->_reply(401, ['ok' => false, 'handled' => false]);
+        }
+
+        try {
+            $event = json_decode($body, true, 32, JSON_THROW_ON_ERROR);
+            $libraryId = Bunny::validateLibraryId((string)(is_array($event) ? ($event['VideoLibraryId'] ?? '') : ''));
+            $videoId = Bunny::validateVideoId((string)($event['VideoGuid'] ?? ''));
+        } catch (\JsonException | \InvalidArgumentException) {
+            return $this->_reply(400, ['ok' => false, 'handled' => false]);
+        }
+
+        if ($libraryId !== $bunny->getLibraryId()) {
+            return $this->_reply(200, ['ok' => true, 'handled' => false]);
+        }
+
+        try {
+            $record = $plugin->getBunnySync()->syncVideo($libraryId, $videoId);
+        } catch (\Throwable $e) {
+            Craft::warning("Bunny Stream webhook sync failed: {$e->getMessage()}", __METHOD__);
+
+            return $this->_reply(503, ['ok' => false, 'handled' => false]);
+        }
+
+        return $this->_reply(200, ['ok' => true, 'handled' => $record !== null]);
+    }
+
+    /**
      * Returns whether a Mux event is about static (MP4) renditions.
      *
      * Covers the per-file `video.asset.static_rendition.*` events and the
@@ -198,5 +268,22 @@ class WebhooksController extends Controller
         }
 
         return $assetId;
+    }
+
+    // Private Methods
+    // =========================================================================
+
+    /**
+     * Returns a JSON reply with a status code.
+     *
+     * @param int $status the HTTP status code
+     * @param array $data the response data
+     * @return Response
+     */
+    private function _reply(int $status, array $data): Response
+    {
+        Craft::$app->getResponse()->setStatusCode($status);
+
+        return $this->asJson($data);
     }
 }

@@ -330,7 +330,9 @@ class EditorContent extends Component
             $status = isset($metadata['bunnyStatus']) ? Bunny::mapStatus((int)$metadata['bunnyStatus']) : '';
             $remoteId = (string)($metadata['bunnyVideoId'] ?? '');
             $idLabel = Craft::t('polymedia', 'Video ID');
-            $instructions = Craft::t('polymedia', 'Status is stored when the item is imported or uploaded. Refresh with `polymedia/bunny/sync` or by re-importing from the video library.');
+            $instructions = Plugin::getInstance()->getBunny()->getWebhookKey() !== ''
+                ? Craft::t('polymedia', 'Status updates automatically via Bunny Stream webhooks.')
+                : Craft::t('polymedia', 'Status is stored when the item is imported or uploaded. Refresh with `polymedia/bunny/sync` or by re-importing from the video library.');
         } else {
             $status = isset($metadata['muxStatus']) ? (string)$metadata['muxStatus'] : '';
             $remoteId = (string)($metadata['muxAssetId'] ?? '');

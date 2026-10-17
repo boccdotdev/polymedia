@@ -377,6 +377,25 @@
             errors: settings.getErrors('bunnyDefaultPlaybackFormat'),
             disabled: not allowAdminChanges,
         }) }}
+
+        {{ forms.autosuggestField({
+            label: 'Bunny Webhook Verification Key'|t('polymedia'),
+            instructions: 'Optional. Select an environment variable such as `$BUNNY_WEBHOOK_KEY` that holds this library’s read-only API key, which Bunny uses to sign webhooks. Leave empty to disable the webhook endpoint; upload polling and console sync still work. Literal values cannot be saved to project config.'|t('polymedia'),
+            id: 'bunnyWebhookKey',
+            name: 'bunnyWebhookKey',
+            value: settings.bunnyWebhookKey,
+            suggestEnvVars: true,
+            errors: settings.getErrors('bunnyWebhookKey'),
+            disabled: not allowAdminChanges,
+        }) }}
+
+        {{ forms.copytextField({
+            label: 'Bunny Webhook URL'|t('polymedia'),
+            instructions: 'Add this URL as the webhook URL in the Bunny Stream library’s settings.'|t('polymedia'),
+            id: 'bunnyWebhookUrl',
+            class: 'code',
+            value: bunnyWebhookUrl,
+        }) }}
     </details>
 {% endif %}
 

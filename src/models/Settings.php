@@ -271,6 +271,14 @@ class Settings extends Model
      */
     public ?string $bunnyCdnHostname = null;
 
+    /**
+     * @var ?string Environment reference for the library's read-only API key,
+     * which Bunny uses to sign webhooks (`$BUNNY_WEBHOOK_KEY`). When empty, the
+     * webhook endpoint is disabled.
+     * @since 2.5.0
+     */
+    public ?string $bunnyWebhookKey = null;
+
     // Public Methods
     // =========================================================================
 
@@ -391,9 +399,9 @@ class Settings extends Model
             'skipOnEmpty' => true,
             'message' => 'Use an environment variable reference such as `$MUX_TOKEN_ID`. Literal credentials cannot be saved to project config.',
         ];
-        $rules[] = [['bunnyLibraryId', 'bunnyApiKey', 'bunnyCdnHostname'], 'string'];
+        $rules[] = [['bunnyLibraryId', 'bunnyApiKey', 'bunnyCdnHostname', 'bunnyWebhookKey'], 'string'];
         $rules[] = [
-            ['bunnyApiKey'],
+            ['bunnyApiKey', 'bunnyWebhookKey'],
             'match',
             'pattern' => self::ENV_REFERENCE_PATTERN,
             'skipOnEmpty' => true,

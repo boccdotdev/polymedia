@@ -81,11 +81,12 @@ class SettingsGatingTest extends TestCase
             ]);
         }
 
-        $attributes = ['videoProvider', 'bunnyLibraryId', 'bunnyApiKey', 'bunnyCdnHostname'];
+        $attributes = ['videoProvider', 'bunnyLibraryId', 'bunnyApiKey', 'bunnyCdnHostname', 'bunnyWebhookKey'];
         $invalid = new Settings([
             'videoProvider' => 'vimeo',
             'bunnyLibraryId' => '12a',
             'bunnyApiKey' => 'literal-key',
+            'bunnyWebhookKey' => 'literal-webhook-key',
             'bunnyCdnHostname' => 'https://vz-example.b-cdn.net/',
         ]);
 
@@ -100,6 +101,7 @@ class SettingsGatingTest extends TestCase
             'bunnyLibraryId' => '133',
             'bunnyApiKey' => '$BUNNY_API_KEY',
             'bunnyCdnHostname' => 'vz-example.b-cdn.net',
+            'bunnyWebhookKey' => '$BUNNY_WEBHOOK_KEY',
         ]);
         $this->assertTrue($literal->validate($attributes));
 

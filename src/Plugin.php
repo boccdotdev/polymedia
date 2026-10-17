@@ -522,6 +522,9 @@ class Plugin extends BasePlugin
             'muxWebhookUrl' => UrlHelper::siteUrl(
                 Craft::$app->getConfig()->getGeneral()->actionTrigger . '/polymedia/webhooks/mux',
             ),
+            'bunnyWebhookUrl' => UrlHelper::siteUrl(
+                Craft::$app->getConfig()->getGeneral()->actionTrigger . '/polymedia/webhooks/bunny',
+            ),
         ]);
     }
 

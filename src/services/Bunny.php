@@ -137,6 +137,44 @@ class Bunny extends Component
     }
 
     /**
+     * Returns the resolved webhook verification key (the library's read-only
+     * API key), or an empty string when unset or not an environment reference.
+     *
+     * @return string
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function getWebhookKey(): string
+    {
+        return $this->_setting('bunnyWebhookKey', true);
+    }
+
+    /**
+     * Verifies a Bunny Stream webhook signature over the raw request body.
+     *
+     * Pure function, exposed static for unit testing.
+     *
+     * @param string $body the raw request body
+     * @param string $signature the `X-BunnyStream-Signature` header (lowercase hex)
+     * @param string $version the `X-BunnyStream-Signature-Version` header
+     * @param string $algorithm the `X-BunnyStream-Signature-Algorithm` header
+     * @param string $key the library's read-only API key
+     * @return bool
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public static function verifyWebhookSignature(string $body, string $signature, string $version, string $algorithm, string $key): bool
+    {
+        return $key !== ''
+            && $version === 'v1'
+            && $algorithm === 'hmac-sha256'
+            && preg_match('/^[a-f0-9]{64}$/D', $signature) === 1
+            && hash_equals(hash_hmac('sha256', $body, $key), $signature);
+    }
+
+    /**
      * Validates a Bunny Stream library ID.
      *
      * @param string $id the library ID

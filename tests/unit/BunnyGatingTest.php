@@ -97,6 +97,12 @@ class BunnyGatingTest extends TestCase
 
         $this->_settings->bunnyLibraryId = '0133';
         self::assertFalse($bunny->isConfigured());
+
+        $this->_settings->bunnyWebhookKey = 'literal-secret';
+        self::assertSame('', $bunny->getWebhookKey());
+
+        $this->_settings->bunnyWebhookKey = '$POLYMEDIA_TEST_BUNNY_KEY';
+        self::assertSame('test-key', $bunny->getWebhookKey());
     }
 
     public function testOnlyTheSelectedConfiguredProviderAcceptsNewMedia(): void
