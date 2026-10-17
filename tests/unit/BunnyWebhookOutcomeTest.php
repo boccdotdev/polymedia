@@ -64,6 +64,14 @@ class BunnyWebhookOutcomeTest extends TestCase
         $this->_deliver('{}', '', '', 'never');
     }
 
+    public function testEndpointIsDisabledWhenBunnyIsUnavailable(): void
+    {
+        // Lite, or Bunny not the configured provider: a valid delivery still 404s.
+        $body = '{"VideoLibraryId":133,"VideoGuid":"' . self::VIDEO . '","Status":3}';
+        $this->expectException(NotFoundHttpException::class);
+        $this->_deliver($body, hash_hmac('sha256', $body, 'read-only-key'), 'read-only-key', 'never', false);
+    }
+
     public function testSignatureUsesTheExactBodyAndStrictHeaders(): void
     {
         $body = '{"VideoLibraryId":133,"VideoGuid":"' . self::VIDEO . '","Status":3}';
@@ -83,7 +91,7 @@ class BunnyWebhookOutcomeTest extends TestCase
     /**
      * Delivers a webhook to the controller with mocked services.
      */
-    private function _deliver(string $body, string $signature, string $key, string $outcome): \yii\web\Response
+    private function _deliver(string $body, string $signature, string $key, string $outcome, bool $enabled = true): \yii\web\Response
     {
         $previousApp = Craft::$app;
         $request = $this->createMock(\craft\web\Request::class);
@@ -119,7 +127,7 @@ class BunnyWebhookOutcomeTest extends TestCase
                 ->onlyMethods(['getBunny', 'getBunnySync', 'getBunnyEnabled'])->getMock();
             $plugin->method('getBunny')->willReturn($bunny);
             $plugin->method('getBunnySync')->willReturn($sync);
-            $plugin->method('getBunnyEnabled')->willReturn(true);
+            $plugin->method('getBunnyEnabled')->willReturn($enabled);
             $app->loadedModules[Plugin::class] = $plugin;
 
             $controller = $this->getMockBuilder(WebhooksController::class)->disableOriginalConstructor()

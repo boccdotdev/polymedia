@@ -24,13 +24,15 @@ use yii\web\Response;
 /**
  * Receives Mux and Bunny Stream webhook deliveries and applies video state.
  *
- * A signature-checking shell around
- * {@see \boccdotdev\polymedia\services\MediaItems::applyMuxAssetState()} — the
- * same pipeline the CP import/upload flow and the console sync command use,
- * so webhook configuration is optional and polling remains the fallback.
+ * Signature-checking shells around the shared state pipelines
+ * ({@see \boccdotdev\polymedia\services\MediaItems::applyMuxAssetState()} and
+ * {@see \boccdotdev\polymedia\services\MediaItems::applyBunnyVideoState()}) that the
+ * CP import/upload flows and console sync commands also use, so webhook
+ * configuration is optional and polling or sync remains the fallback.
  *
- * The endpoint answers only when a webhook signing secret is configured, and
- * every delivery must carry a valid `Mux-Signature` header.
+ * Each endpoint answers only when its provider is enabled and its key is
+ * configured. Mux deliveries must carry a valid `Mux-Signature` header; Bunny
+ * deliveries a valid `X-BunnyStream-Signature` (HMAC-SHA256 of the raw body).
  *
  * @author boccdotdev
  * @since 2.2.0
