@@ -35,6 +35,7 @@ use boccdotdev\polymedia\services\ProviderFilter;
 use boccdotdev\polymedia\services\RelatedAssets;
 use boccdotdev\polymedia\services\Renderer;
 use boccdotdev\polymedia\services\SidecarStorage;
+use boccdotdev\polymedia\services\SourceAssets;
 use boccdotdev\polymedia\services\ThumbnailDeriver;
 use boccdotdev\polymedia\services\UrlDetector;
 use boccdotdev\polymedia\services\VideoUploads;
@@ -95,6 +96,7 @@ use yii\base\Event;
  * @property-read Bunny $bunny
  * @property-read BunnySync $bunnySync
  * @property-read VideoUploads $videoUploads
+ * @property-read SourceAssets $sourceAssets
  * @property-read PosterFetcher $posterFetcher
  * @property-read SidecarStorage $sidecarStorage
  *
@@ -175,6 +177,7 @@ class Plugin extends BasePlugin
             'bunny' => Bunny::class,
             'bunnySync' => BunnySync::class,
             'videoUploads' => VideoUploads::class,
+            'sourceAssets' => SourceAssets::class,
             'posterFetcher' => PosterFetcher::class,
             'sidecarStorage' => SidecarStorage::class,
         ]);
@@ -447,6 +450,19 @@ class Plugin extends BasePlugin
     public function getVideoUploads(): VideoUploads
     {
         return $this->get('videoUploads');
+    }
+
+    /**
+     * Returns the Craft-hosted video reference service.
+     *
+     * @return SourceAssets
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function getSourceAssets(): SourceAssets
+    {
+        return $this->get('sourceAssets');
     }
 
     /**
@@ -1265,6 +1281,9 @@ class Plugin extends BasePlugin
                     'Import a video from your video library',
                     'Upload video',
                     'Upload a video file to your video library',
+                    'From existing asset',
+                    'Use a video asset without changing the original file',
+                    'Could not create media item.',
                     'Add media URL',
                     'Media item created.',
                     'Import',
@@ -1354,6 +1373,7 @@ class Plugin extends BasePlugin
             function() {
                 MediaItemLoader::reset();
                 RelatedAssetLoader::reset();
+                $this->getSourceAssets()->reset();
             },
         );
     }

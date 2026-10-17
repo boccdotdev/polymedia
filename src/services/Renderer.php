@@ -122,10 +122,17 @@ class Renderer extends Component
         }
 
         try {
-            return Plugin::getInstance()->getManifestWriter()->read($asset);
+            $manifest = Plugin::getInstance()->getManifestWriter()->read($asset);
         } catch (\Throwable) {
             return [];
         }
+
+        // A reference plays its source's current URL, or nothing once it's gone.
+        if (SourceAssets::isReference($manifest)) {
+            $manifest['url'] = Plugin::getInstance()->getSourceAssets()->resolveUrl($manifest) ?? '';
+        }
+
+        return $manifest;
     }
 
     /**

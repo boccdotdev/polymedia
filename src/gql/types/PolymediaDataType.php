@@ -13,9 +13,11 @@ namespace boccdotdev\polymedia\gql\types;
 
 use boccdotdev\polymedia\gql\loaders\RelatedAssetLoader;
 use boccdotdev\polymedia\gql\PolymediaData;
+use boccdotdev\polymedia\Plugin;
 use boccdotdev\polymedia\records\MediaItemRecord;
 use boccdotdev\polymedia\services\EditorContent;
 use boccdotdev\polymedia\services\MediaItems;
+use boccdotdev\polymedia\services\SourceAssets;
 use Craft;
 use craft\gql\base\ObjectType;
 use craft\gql\GqlEntityRegistry;
@@ -169,7 +171,7 @@ class PolymediaDataType extends ObjectType
 
         return match ($resolveInfo->fieldName) {
             'type' => (string)$record->type,
-            'url' => $this->_nullableString($record->url),
+            'url' => $this->_nullableString($this->_resolveUrl($record)),
             'providerId' => $this->_nullableString($record->providerId),
             'element' => $this->_nullableString($record->element),
             'title' => $this->_nullableString($record->title),
@@ -323,6 +325,28 @@ class PolymediaDataType extends ObjectType
         }
 
         return null;
+    }
+
+    /**
+     * Returns the URL an item plays: a source asset reference's current URL
+     * (null when the source is gone), else the stored URL.
+     *
+     * @param MediaItemRecord $record the media item
+     * @return ?string
+     */
+    private function _resolveUrl(MediaItemRecord $record): ?string
+    {
+        $manifest = [
+            'url' => $record->url,
+            'providerId' => $record->providerId,
+            'metadata' => MediaItems::decodeMetadataJson($record->metadata),
+        ];
+
+        if (!SourceAssets::isReference($manifest)) {
+            return $record->url;
+        }
+
+        return Plugin::getInstance()->getSourceAssets()->resolveUrl($manifest);
     }
 
     /**

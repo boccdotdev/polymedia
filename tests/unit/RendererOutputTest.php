@@ -18,6 +18,7 @@ use boccdotdev\polymedia\services\ManifestWriter;
 use boccdotdev\polymedia\services\MediaItems;
 use boccdotdev\polymedia\services\RelatedAssets;
 use boccdotdev\polymedia\services\Renderer;
+use boccdotdev\polymedia\services\SourceAssets;
 use boccdotdev\polymedia\services\UrlDetector;
 use Craft;
 use craft\elements\Asset;
@@ -67,6 +68,11 @@ class RendererOutputTest extends TestCase
      * @var Settings
      */
     private Settings $_settings;
+
+    /**
+     * @var ?string the current URL of a referenced source asset
+     */
+    private ?string $_sourceUrl = null;
 
     /**
      * @var string the current site's language
@@ -130,8 +136,11 @@ class RendererOutputTest extends TestCase
         );
 
         $plugin = $this->getMockBuilder(Plugin::class)->disableOriginalConstructor()
-            ->onlyMethods(['getMediaItems', 'getManifestWriter', 'getRelatedAssets', 'getUrlDetector', 'getSettings'])
+            ->onlyMethods(['getMediaItems', 'getManifestWriter', 'getRelatedAssets', 'getUrlDetector', 'getSettings', 'getSourceAssets'])
             ->getMock();
+        $sources = $this->createMock(SourceAssets::class);
+        $sources->method('resolveUrl')->willReturnCallback(fn() => $this->_sourceUrl);
+        $plugin->method('getSourceAssets')->willReturn($sources);
         $plugin->method('getMediaItems')->willReturn($items);
         $plugin->method('getManifestWriter')->willReturn($writer);
         $plugin->method('getRelatedAssets')->willReturn($related);
@@ -509,6 +518,25 @@ class RendererOutputTest extends TestCase
 
         $this->_settings->playerEngine = Settings::ENGINE_VIDEOJS;
         $this->assertSame(1, substr_count((string)(new Renderer())->scripts(['hls', 'bunny']), 'media/hlsjs-video.js'));
+    }
+
+    public function testSourceReferencesPlayTheCurrentUrlOnBothEngines(): void
+    {
+        $manifest = self::_manifest('mp4', 'asset:uid-10', 'asset:uid-10', 'video', ['sourceAssetUid' => 'uid-10']);
+        $this->_given($manifest, ['element' => 'video'], null, []);
+        $this->_sourceUrl = 'https://media.example/renamed.mp4';
+
+        $this->assertSame('https://media.example/renamed.mp4', (new Renderer())->data($this->_polymediaAsset())['url']);
+        $this->assertStringContainsString('<video src="https://media.example/renamed.mp4"', (string)(new Renderer())->player($this->_polymediaAsset()));
+        $this->assertStringNotContainsString('asset:', (string)(new Renderer())->element($this->_polymediaAsset(), ['mediaAttrs' => ['src' => 'asset:uid-10']]));
+
+        $this->_settings->playerEngine = Settings::ENGINE_VIDEOJS;
+        $this->assertStringContainsString('<video src="https://media.example/renamed.mp4"', (string)(new Renderer())->player($this->_polymediaAsset()));
+
+        // A trashed or deleted source never falls back to a stored URL.
+        $this->_sourceUrl = null;
+        $this->assertSame('', (string)(new Renderer())->player($this->_polymediaAsset()));
+        $this->assertSame('', (string)(new Renderer())->element($this->_polymediaAsset()));
     }
 
     public function testScriptsAcceptAProviderList(): void

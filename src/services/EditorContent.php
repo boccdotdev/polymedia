@@ -155,7 +155,8 @@ class EditorContent extends Component
     /**
      * Whether an item is a managed video whose URL and type authors can't edit.
      *
-     * Covers Mux and Bunny library imports and uploads.
+     * Covers Mux and Bunny library imports and uploads, and references to
+     * Craft-hosted videos.
      *
      * @param MediaItemRecord $record the media item
      * @return bool
@@ -167,7 +168,9 @@ class EditorContent extends Component
     {
         $metadata = MediaItems::decodeMetadataJson($record->metadata);
 
-        return !empty($metadata['muxAssetId']) || !empty($metadata['bunnyVideoId']);
+        return !empty($metadata['muxAssetId'])
+            || !empty($metadata['bunnyVideoId'])
+            || SourceAssets::isReference(['providerId' => $record->providerId, 'metadata' => $metadata]);
     }
 
     /**

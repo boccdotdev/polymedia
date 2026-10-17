@@ -419,7 +419,7 @@ function menuLabels(s) {
 
 test('the Add media menu follows the selected provider', () => {
   const mux = setup({ config: { videoProvider: 'mux', videoEnabled: true } });
-  assert.deepEqual(menuLabels(mux), ['From URL', 'Browse video library', 'Upload video']);
+  assert.deepEqual(menuLabels(mux), ['From URL', 'From existing asset', 'Browse video library', 'Upload video']);
   assert.equal(mux.picker.videoAction('library'), 'polymedia/mux/library');
 
   const bunny = setup({ config: { videoProvider: 'bunny', videoEnabled: true } });
@@ -427,9 +427,9 @@ test('the Add media menu follows the selected provider', () => {
   assert.equal(bunny.picker.videoAction('library'), 'polymedia/bunny/library');
 });
 
-test('Lite and unconfigured sites only get From URL', () => {
-  assert.deepEqual(menuLabels(setup()), ['From URL']);
-  assert.deepEqual(menuLabels(setup({ config: { videoProvider: 'bunny', videoEnabled: false } })), ['From URL']);
+test('Lite and unconfigured sites keep URL and existing-asset media only', () => {
+  assert.deepEqual(menuLabels(setup()), ['From URL', 'From existing asset']);
+  assert.deepEqual(menuLabels(setup({ config: { videoProvider: 'bunny', videoEnabled: false } })), ['From URL', 'From existing asset']);
 });
 
 test('Bunny import sends videoId and keeps field-selection refusal protection', async () => {
@@ -473,4 +473,26 @@ test('upload context carries the picker field and owner element', () => {
   assert.equal(context.siteId, 2);
   assert.equal(context.fieldId, 7);
   assert.equal(context.elementId, 8);
+});
+
+test('existing asset action is video-only and checks destination selection', async () => {
+  const s = setup({ eligible: false });
+  let selector;
+  let imported;
+  s.Craft.createElementSelectorModal = (_type, settings) => { selector = settings; };
+  const request = s.Craft.sendActionRequest;
+  s.Craft.sendActionRequest = (method, action, options) => {
+    if (action === 'polymedia/source-assets/import') {
+      imported = options.data;
+      return Promise.resolve({ data: { assetId: 42 } });
+    }
+    return request(method, action, options);
+  };
+  s.picker.openSourceAsset(s.index);
+  assert.equal(selector.criteria.kind, 'video');
+  assert.equal(selector.multiSelect, false);
+  await selector.onSelect([{ id: 11 }]);
+  assert.equal(imported.sourceAssetId, 11);
+  assert.equal(s.notices.length, 0);
+  assert.equal(s.errors.length, 1);
 });

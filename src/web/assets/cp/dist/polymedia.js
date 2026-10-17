@@ -166,6 +166,17 @@
         },
       });
 
+      disclosure.addItem({
+        label: Craft.t('polymedia', 'From existing asset'),
+        description: Craft.t(
+          'polymedia',
+          'Use a video asset without changing the original file'
+        ),
+        onActivate: function () {
+          Craft.Polymedia.openSourceAsset(assetIndex);
+        },
+      });
+
       if (!Craft.Polymedia.videoEnabled) {
         return;
       }
@@ -237,6 +248,41 @@
       new Craft.Polymedia.VideoUploadModal({
         assetIndex: assetIndex,
         folderId: Craft.Polymedia._folderId(assetIndex),
+      });
+    },
+
+    /**
+     * Picks a Craft video and wraps it in a `.pmedia` reference.
+     *
+     * @param {Craft.AssetIndex} assetIndex
+     */
+    openSourceAsset: function (assetIndex) {
+      Craft.createElementSelectorModal('craft\\elements\\Asset', {
+        multiSelect: false,
+        criteria: { kind: 'video', siteId: (assetIndex && assetIndex.siteId) || Craft.siteId },
+        onSelect: async function (elements) {
+          if (!elements || !elements.length) {
+            return;
+          }
+
+          try {
+            var response = await Craft.sendActionRequest('POST', 'polymedia/source-assets/import', {
+              data: {
+                sourceAssetId: elements[0].id,
+                folderId: Craft.Polymedia._folderId(assetIndex),
+              },
+            });
+
+            if (await Craft.Polymedia.finishSelection(assetIndex, response.data.assetId)) {
+              Craft.cp.displayNotice(Craft.t('polymedia', 'Media item created.'));
+            }
+          } catch (error) {
+            Craft.cp.displayError(
+              (error && error.response && error.response.data && error.response.data.message) ||
+                Craft.t('polymedia', 'Could not create media item.')
+            );
+          }
+        },
       });
     },
 
