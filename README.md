@@ -450,10 +450,10 @@ The layout rules and each player's `aspect-ratio` are inline styles. A Content S
 
 In self-host mode, copy the contents of the `@videojs/cdn` package into your **Self-Host Base URL**, keeping its layout (`global.css`, `i18n.js`, `video*.js`, `audio*.js`, `locales/`, `media/` and the chunk files next to them). Add `jwplayer-video-element.min.js`, `peertube-video-element.min.js` or `videojs-video-element.min.js` at the top level if you use those providers.
 
-In none mode, load the files yourself and add these rules to your CSS. The first stops players collapsing before their scripts load, the second sizes iframe providers inside a skin, and the third lets standalone embeds fill the width:
+In none mode, load the files yourself and add these rules to your CSS. The first gives skins and `<media-container>` a block box so `aspect-ratio` applies, the second sizes iframe providers inside a skin, and the third lets standalone embeds fill the width:
 
 ```css
-:where(video-skin,video-neutral-skin,video-compat-skin,audio-skin,audio-neutral-skin,audio-compat-skin,media-container):not(:defined){display:block}
+:where(video-skin,video-neutral-skin,video-compat-skin,audio-skin,audio-neutral-skin,audio-compat-skin):not(:defined),:where(media-container){display:block}
 :where(video-skin,video-neutral-skin,video-compat-skin,media-container)>:where(youtube-video,vimeo-video,cloudflare-video,twitch-video,tiktok-video){display:block;width:100%;height:100%}
 :where(jwplayer-video,peertube-video,videojs-video){display:block;width:100%}
 ```
@@ -480,7 +480,28 @@ Choose the default under **Video.js Skin** (`default`, `neutral` or `compat`) or
 {{ craft.polymedia.player(media, { skin: 'neutral' }) }}
 ```
 
-Load any extra skin with the `skins` option on `scripts()`. Style a skin with its CSS custom properties, such as `--media-accent-color` and `--media-border-radius`. See the [Video.js skin docs](https://videojs.org/docs/framework/html/guides/customize-skins).
+Load any extra skin with the `skins` option on `scripts()`. Style a skin with its CSS custom properties: `--media-accent-color`, `--media-accent-text-color`, `--media-border-color`, `--media-border-radius`, `--media-font-family`, `--media-object-fit`, `--media-object-position` and `--media-scale-unit`. See the [Video.js skin docs](https://videojs.org/docs/framework/html/guides/customize-skins).
+
+### Skin examples
+
+[`examples/videojs/`](examples/videojs) has two starting points. Copy the files into your project; Polymedia doesn't load them for you.
+
+**Brand theme** (`brand-theme.css`) restyles a packaged skin with its CSS custom properties only: accent colour, square corners, font and control size. No build step and no copied skin source:
+
+```twig
+{{ craft.polymedia.player(media, { class: 'brand-player' }) }}
+```
+
+**Media Chrome look-alike** (`media-chrome-controls.twig` and `media-chrome.css`) recreates Media Chrome's control bar with your own controls, so a site moving from Media Chrome keeps its look. Copy the Twig file to `templates/_polymedia/` and the CSS into your stylesheet:
+
+```twig
+{{ craft.polymedia.player(media, {
+    class: 'media-chrome',
+    children: include('_polymedia/media-chrome-controls.twig'),
+}) }}
+```
+
+The CSS reads Media Chrome's own variables first (`--media-primary-color`, `--media-control-background`, `--media-control-hover-background`, `--media-range-bar-color` and the rest), so colours and sizes you set for Media Chrome carry over. It differs in two small ways: times show as `00:00` rather than `0:00`, and controls the media can't use, such as captions without tracks, are hidden rather than disabled.
 
 ### Box size
 
@@ -493,17 +514,31 @@ The player reserves its box with an inline `aspect-ratio`, so lazy players don't
 
 ### Custom controls
 
-Passing `children` drops the skin and renders `<media-container>` with your own Video.js controls. The skin's script defines every control element, and they come unstyled. The poster stays on `<video-player>`, so include a `<media-poster>` with an `<img>` in your controls if you want it shown before playback:
+Passing `children` drops the skin and renders `<media-container>` with your own Video.js controls. The skin's script defines every control element. They come unstyled and expose their state as `data-*` attributes (`data-paused`, `data-muted`, `data-fullscreen`, `data-active` on captions), which your CSS uses to pick icons. The poster goes on the media element, since there's no skin to show it.
 
 ```twig
 {{ craft.polymedia.player(media, {
+    class: 'my-player',
     children: '<media-controls>
         <media-play-button><media-icon name="play"></media-icon><media-icon name="pause"></media-icon></media-play-button>
-        <media-time-slider></media-time-slider>
-        <media-mute-button></media-mute-button>
+        <media-mute-button><media-icon name="volume-high"></media-icon><media-icon name="volume-off"></media-icon></media-mute-button>
+        <media-fullscreen-button><media-icon name="fullscreen-enter"></media-icon><media-icon name="fullscreen-exit"></media-icon></media-fullscreen-button>
     </media-controls>'
 }) }}
 ```
+
+```css
+.my-player media-play-button[data-paused] [name="pause"],
+.my-player media-play-button:not([data-paused]) [name="play"],
+.my-player media-mute-button[data-muted] [name="volume-high"],
+.my-player media-mute-button:not([data-muted]) [name="volume-off"],
+.my-player media-fullscreen-button[data-fullscreen] [name="fullscreen-enter"],
+.my-player media-fullscreen-button:not([data-fullscreen]) [name="fullscreen-exit"] {
+  display: none;
+}
+```
+
+`<media-icon>` draws icons from the default skin, which `scripts()` loads unless you configure another skin. You can use your own SVGs instead. Sliders need their track, fill and thumb parts; the [Media Chrome look-alike](#skin-examples) shows a complete control bar.
 
 Media Chrome control markup isn't translated. Several elements were renamed (`media-time-range` is now `media-time-slider`, `media-control-bar` is now `media-controls`) and state attributes became `data-*` attributes. See the [migration guide](https://videojs.org/docs/framework/html/guides/migrate-from-media-chrome).
 

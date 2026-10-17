@@ -1,0 +1,172 @@
+/*
+ * Media Chrome look-alike for Polymedia's Video.js engine.
+ *
+ * Styles the controls in media-chrome-controls.twig like Media Chrome's
+ * default control bar: a flat, translucent strip along the bottom, light
+ * icons and a thin time range.
+ *
+ *   {{ craft.polymedia.player(media, {
+ *       class: 'media-chrome',
+ *       children: include('_polymedia/media-chrome-controls.twig'),
+ *   }) }}
+ *
+ * Every value reads Media Chrome's own CSS variable first, with Media Chrome's
+ * default as the fallback. A site that already themes Media Chrome through
+ * those variables keeps its colours and sizes after switching engines.
+ */
+
+.media-chrome {
+  --mc-primary: var(--media-primary-color, rgb(238 238 238));
+  --mc-background: var(--media-control-background, var(--media-secondary-color, rgb(20 20 30 / 0.7)));
+  --mc-hover: var(--media-control-hover-background, rgb(50 50 70 / 0.7));
+  --mc-padding: var(--media-control-padding, 10px);
+  --mc-icon: var(--media-button-icon-height, var(--media-control-height, 24px));
+
+  position: relative;
+  overflow: hidden;
+  background: #000;
+  color: var(--media-text-color, var(--mc-primary));
+  font-family: var(--media-font-family, "helvetica neue", "segoe ui", roboto, arial, sans-serif);
+  font-size: var(--media-font-size, 13px);
+  line-height: var(--mc-icon);
+}
+
+/* Media elements fill the box; iframe providers are sized by Polymedia's rules. */
+.media-chrome > :first-child {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.mc-bar {
+  position: absolute;
+  inset: auto 0 0;
+  z-index: 1;
+  display: flex;
+  transition: opacity 0.25s;
+}
+
+/* Like Media Chrome, hide the bar once the viewer goes idle during playback. */
+.media-chrome:not([data-controls-visible]) .mc-bar {
+  opacity: 0;
+}
+
+.mc-bar > * {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  min-height: calc(var(--mc-icon) + 2 * var(--mc-padding));
+  padding: var(--mc-padding);
+  background: var(--mc-background);
+  color: var(--media-icon-color, var(--mc-primary));
+}
+
+.mc-button {
+  cursor: pointer;
+  border: 0;
+}
+
+.mc-button:hover,
+.mc-button:focus-visible {
+  background: var(--mc-hover);
+  outline: none;
+}
+
+.mc-icon {
+  display: block;
+  width: auto;
+  height: var(--mc-icon);
+  fill: currentColor;
+}
+
+.mc-seek-label {
+  font: 700 8px Arial, sans-serif;
+}
+
+/* Show the icon that matches each control's state. */
+media-play-button:not([data-paused]) .mc-play,
+media-play-button[data-paused] .mc-pause,
+media-mute-button:not([data-muted]) .mc-volume-off,
+media-mute-button[data-muted] .mc-volume-low,
+media-mute-button[data-muted] .mc-volume-high,
+media-mute-button:not([data-volume-level="low"]) .mc-volume-low,
+media-mute-button[data-volume-level="low"] .mc-volume-high,
+media-captions-button:not([data-active]) .mc-captions-on,
+media-captions-button[data-active] .mc-captions-off,
+media-fullscreen-button:not([data-fullscreen]) .mc-fullscreen-exit,
+media-fullscreen-button[data-fullscreen] .mc-fullscreen-enter {
+  display: none;
+}
+
+/* Hide controls the browser or the media can't use. Media Chrome shows a
+   disabled captions button instead; remove this rule to match it exactly. */
+.mc-bar > [data-availability="unavailable"],
+.mc-bar > [data-availability="unsupported"] {
+  display: none;
+}
+
+/* The padded wrapper carries the bar background; the slider inside has no
+   padding, so the thumb can sit at `--media-slider-fill` directly. */
+.mc-slider {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: var(--mc-icon);
+  cursor: pointer;
+}
+
+.mc-time-range {
+  flex: 1;
+}
+
+.mc-volume-range {
+  width: 100px;
+}
+
+.mc-track {
+  position: relative;
+  width: 100%;
+  height: var(--media-range-track-height, 4px);
+  overflow: hidden;
+  border-radius: var(--media-range-track-border-radius, 1px);
+  background: var(--media-range-track-background, rgb(255 255 255 / 0.2));
+}
+
+.mc-buffer,
+.mc-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+}
+
+.mc-buffer {
+  width: var(--media-slider-buffer, 0%);
+  background: var(--media-time-range-buffered-color, rgb(255 255 255 / 0.4));
+}
+
+.mc-fill {
+  width: var(--media-slider-fill, 0%);
+  background: var(--media-range-bar-color, var(--mc-primary));
+}
+
+.mc-thumb {
+  position: absolute;
+  top: 50%;
+  left: var(--media-slider-fill, 0%);
+  width: var(--media-range-thumb-width, 10px);
+  height: var(--media-range-thumb-height, 10px);
+  border-radius: var(--media-range-thumb-border-radius, 10px);
+  background: var(--media-range-thumb-background, var(--mc-primary));
+  translate: -50% -50%;
+}
+
+.mc-time {
+  gap: 0.3em;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Media Chrome shows "current / duration". */
+.mc-time media-time-separator:empty::before {
+  content: "/";
+}

@@ -1,0 +1,24 @@
+/*
+ * Brand theme for a packaged Video.js skin.
+ *
+ * Packaged skins expose a small set of CSS custom properties. Set them on the
+ * skin or on anything that contains it. No build step, no copied skin source.
+ *
+ *   {{ craft.polymedia.player(media, { class: 'brand-player' }) }}
+ *
+ * `class` lands on the skin element, so these properties reach its controls.
+ */
+
+.brand-player {
+  /* Slider fills, highlighted controls and the play button. */
+  --media-accent-color: #ff5a1f;
+  /* Text and icons drawn on top of the accent colour. */
+  --media-accent-text-color: #fff;
+  /* Square corners and no hairline around the player. */
+  --media-border-radius: 0;
+  --media-border-color: transparent;
+  /* Interface font. */
+  --media-font-family: "Inter", system-ui, sans-serif;
+  /* Base size for spacing, icons and text. Smaller makes the controls tighter. */
+  --media-scale-unit: 0.875rem;
+}
