@@ -1,6 +1,9 @@
-// Optional real jQuery/blueimp integration proof:
+// Real jQuery/blueimp integration proof:
 // NODE_PATH=/path/to/modules node --test tests/js/blueimp-transport.test.cjs
 // Dependencies: jquery@3.7.1 jsdom@26.1.0 blueimp-file-upload@10.32.0.
+// Set POLYMEDIA_CRAFT_UPLOADER_SOURCE to Craft's src/web/assets/cp/src/js/Uploader.js
+// to run Craft's own onFileAdd. CI fetches it for the installed version and sets
+// POLYMEDIA_REQUIRE_CRAFT_UPLOADER so a missing file fails instead of skipping.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -11,6 +14,9 @@ const installedCraftSource = path.join(__dirname,
   '../../vendor/craftcms/cms/src/web/assets/cp/src/js/Uploader.js');
 const craftSource = process.env.POLYMEDIA_CRAFT_UPLOADER_SOURCE ||
   (fs.existsSync(installedCraftSource) ? installedCraftSource : null);
+if (process.env.POLYMEDIA_REQUIRE_CRAFT_UPLOADER && (!available || !craftSource || !fs.existsSync(craftSource))) {
+  throw new Error('POLYMEDIA_REQUIRE_CRAFT_UPLOADER is set, but the blueimp test dependencies or Craft\'s Uploader.js source are missing.');
+}
 
 test('real blueimp queue retains active accounting and never sends routed bytes to native XHR',
   {skip: !available}, async () => {
