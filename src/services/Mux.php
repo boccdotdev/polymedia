@@ -11,9 +11,11 @@
 
 namespace boccdotdev\polymedia\services;
 
+use boccdotdev\polymedia\models\Settings;
 use boccdotdev\polymedia\Plugin;
 use Craft;
 use craft\helpers\App;
+use craft\helpers\Json;
 use GuzzleHttp\Client;
 use MuxPhp\Api\AssetsApi;
 use MuxPhp\Api\DirectUploadsApi;
@@ -22,6 +24,7 @@ use MuxPhp\Configuration;
 use MuxPhp\Models\Asset;
 use MuxPhp\Models\AssetMetadata;
 use MuxPhp\Models\CreateAssetRequest;
+use MuxPhp\Models\CreateStaticRenditionRequest;
 use MuxPhp\Models\CreateUploadRequest;
 use MuxPhp\Models\PlaybackID;
 use MuxPhp\Models\PlaybackPolicy;
@@ -231,7 +234,7 @@ class Mux extends Component
      * matching the import flow's preference.
      *
      * @param array $data the event's `data` payload (a Mux asset object)
-     * @return array{assetId: string, playbackId: ?string, playbackPolicy: ?string, status: string, duration: mixed, aspectRatio: ?string, width: ?int, height: ?int}
+     * @return array{assetId: string, playbackId: ?string, playbackPolicy: ?string, status: string, duration: mixed, aspectRatio: ?string, width: ?int, height: ?int, mp4Renditions?: array}
      *
      * @author boccdotdev
      * @since 2.2.0
@@ -270,7 +273,54 @@ class Mux extends Component
             'duration' => $data['duration'] ?? null,
             'aspectRatio' => isset($data['aspect_ratio']) ? (string)$data['aspect_ratio'] : null,
             ...self::videoTrackDimensions((array)($data['tracks'] ?? [])),
+            // A payload without renditions must not clear the stored ones.
+            ...(array_key_exists('static_renditions', $data) ? [
+                'mp4Renditions' => self::mapMp4Renditions($data, $playbackPolicy === 'public' ? $playbackId : null),
+            ] : []),
         ];
+    }
+
+    /**
+     * Maps a Mux asset's MP4 static renditions to stored rendition state.
+     *
+     * Reads per-file status, and the legacy `mp4_support` aggregate status
+     * for files that don't carry their own. MP4 readiness is never inferred
+     * from the asset's HLS status. Pure function, exposed static for unit
+     * testing.
+     *
+     * @param array $asset the Mux asset as an array (`static_renditions`, `mp4_support`)
+     * @param ?string $playbackId the public playback ID; null maps nothing
+     * @return array<int, array{url: string, status: string, width: int, height: int}>
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public static function mapMp4Renditions(array $asset, ?string $playbackId): array
+    {
+        if ($playbackId === null || !preg_match('/^[a-zA-Z0-9]+$/D', $playbackId)) {
+            return [];
+        }
+
+        $static = is_array($asset['static_renditions'] ?? null) ? $asset['static_renditions'] : [];
+        $legacy = !empty($asset['mp4_support']) && $asset['mp4_support'] !== 'none';
+        $renditions = [];
+
+        foreach ((array)($static['files'] ?? []) as $file) {
+            $name = is_array($file) ? ($file['name'] ?? '') : '';
+
+            if (!is_string($name) || !preg_match('/^[a-zA-Z0-9][a-zA-Z0-9_-]*\.mp4$/D', $name)) {
+                continue;
+            }
+
+            $renditions[] = [
+                'url' => "https://stream.mux.com/{$playbackId}/{$name}",
+                'status' => (string)($file['status'] ?? ($legacy ? ($static['status'] ?? 'preparing') : 'preparing')),
+                'width' => (int)($file['width'] ?? 0),
+                'height' => (int)($file['height'] ?? 0),
+            ];
+        }
+
+        return $renditions;
     }
 
     /**
@@ -454,6 +504,11 @@ class Mux extends Component
             'playback_policy' => [PlaybackPolicy::_PUBLIC],
         ]);
 
+        // Only new uploads request a rendition, and only when MP4 is preferred.
+        if (Plugin::getInstance()->getSettings()->muxDefaultPlaybackFormat === Settings::FORMAT_MP4) {
+            $newAssetSettings->setStaticRenditions([new CreateStaticRenditionRequest(['resolution' => 'highest'])]);
+        }
+
         if ($title !== '') {
             $newAssetSettings->setMeta(new AssetMetadata(['title' => $title]));
         }
@@ -617,6 +672,10 @@ class Mux extends Component
             'thumbnailUrl' => $thumbnailUrl,
             'createdAt' => $asset->getCreatedAt(),
             'passthrough' => $asset->getPassthrough(),
+            'mp4Renditions' => self::mapMp4Renditions(
+                Json::decode(Json::encode($asset)) ?? [],
+                $playback['policy'] === 'public' ? $playbackId : null,
+            ),
         ];
     }
 

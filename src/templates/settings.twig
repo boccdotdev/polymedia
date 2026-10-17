@@ -274,6 +274,20 @@
             disabled: not allowAdminChanges,
         }) }}
 
+        {{ forms.selectField({
+            label: 'Default Playback Format'|t('polymedia'),
+            instructions: 'HLS adapts to the viewer’s connection. MP4 plays the highest ready rendition and falls back to HLS until one is available. Choosing MP4 asks Mux to create a rendition for new uploads, which may add Mux charges. Existing videos aren’t re-encoded.'|t('polymedia'),
+            id: 'muxDefaultPlaybackFormat',
+            name: 'muxDefaultPlaybackFormat',
+            value: settings.muxDefaultPlaybackFormat,
+            options: [
+                { label: 'HLS (recommended)'|t('polymedia'), value: 'hls' },
+                { label: 'MP4 when available'|t('polymedia'), value: 'mp4' },
+            ],
+            errors: settings.getErrors('muxDefaultPlaybackFormat'),
+            disabled: not allowAdminChanges,
+        }) }}
+
         {{ forms.lightswitchField({
             label: 'Delete Mux asset when Craft asset is deleted'|t('polymedia'),
             instructions: 'When enabled, hard-deleting a Mux `.pmedia` asset also deletes the video from your Mux account. Soft-delete / trash is never sent to Mux. Default off.'|t('polymedia'),
@@ -346,6 +360,20 @@
             value: settings.bunnyCdnHostname,
             suggestEnvVars: true,
             errors: settings.getErrors('bunnyCdnHostname'),
+            disabled: not allowAdminChanges,
+        }) }}
+
+        {{ forms.selectField({
+            label: 'Default Playback Format'|t('polymedia'),
+            instructions: 'MP4 plays the highest MP4 file Bunny actually serves and falls back to HLS. Turn on MP4 fallback in the Bunny library before uploading. This setting doesn’t change Bunny’s encoding or regenerate older videos.'|t('polymedia'),
+            id: 'bunnyDefaultPlaybackFormat',
+            name: 'bunnyDefaultPlaybackFormat',
+            value: settings.bunnyDefaultPlaybackFormat,
+            options: [
+                { label: 'HLS (recommended)'|t('polymedia'), value: 'hls' },
+                { label: 'MP4 when available'|t('polymedia'), value: 'mp4' },
+            ],
+            errors: settings.getErrors('bunnyDefaultPlaybackFormat'),
             disabled: not allowAdminChanges,
         }) }}
     </details>

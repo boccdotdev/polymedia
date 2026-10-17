@@ -159,7 +159,8 @@ class MediaChrome extends PlayerEngine
             }
         }
 
-        return implode("\n", $tags);
+        // Providers can share a package (`hls` and `bunny`).
+        return implode("\n", array_unique($tags));
     }
 
     // Private Methods
@@ -186,7 +187,7 @@ class MediaChrome extends PlayerEngine
                 $attrs['stream-type'] = 'on-demand';
             }
         } else {
-            $attrs['src'] = $manifest['url'] ?? '';
+            $attrs['src'] = $context->src;
         }
 
         $attrs += $this->playbackAttributes($context->settings, $emitControls);

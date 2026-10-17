@@ -71,6 +71,24 @@ class Settings extends Model
     public const VIDEO_PROVIDERS = [self::PROVIDER_MUX, self::PROVIDER_BUNNY];
 
     /**
+     * @var string HLS playback format.
+     * @since 2.5.0
+     */
+    public const FORMAT_HLS = 'hls';
+
+    /**
+     * @var string MP4 playback format.
+     * @since 2.5.0
+     */
+    public const FORMAT_MP4 = 'mp4';
+
+    /**
+     * @var string[] Every playback format handle.
+     * @since 2.5.0
+     */
+    public const PLAYBACK_FORMATS = [self::FORMAT_HLS, self::FORMAT_MP4];
+
+    /**
      * @var string Pattern for a whole-value environment variable reference.
      * @since 2.5.0
      */
@@ -220,6 +238,20 @@ class Settings extends Model
     public string $videoProvider = self::PROVIDER_MUX;
 
     /**
+     * @var string Preferred playback format for Mux assets, `hls` or `mp4`.
+     * MP4 plays the highest ready static rendition and falls back to HLS.
+     * @since 2.5.0
+     */
+    public string $muxDefaultPlaybackFormat = self::FORMAT_HLS;
+
+    /**
+     * @var string Preferred playback format for Bunny Stream assets, `hls` or
+     * `mp4`. MP4 plays the highest verified MP4 file and falls back to HLS.
+     * @since 2.5.0
+     */
+    public string $bunnyDefaultPlaybackFormat = self::FORMAT_HLS;
+
+    /**
      * @var ?string Bunny Stream library ID. Supports env syntax (`$BUNNY_LIBRARY_ID`).
      * @since 2.5.0
      */
@@ -287,6 +319,26 @@ class Settings extends Model
     }
 
     /**
+     * Returns a hosting provider's default playback format.
+     *
+     * @param string $provider `mux` or `bunny`
+     * @return string `hls` or `mp4`; `hls` for any other provider
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function getDefaultPlaybackFormat(string $provider): string
+    {
+        $format = match ($provider) {
+            self::PROVIDER_MUX => $this->muxDefaultPlaybackFormat,
+            self::PROVIDER_BUNNY => $this->bunnyDefaultPlaybackFormat,
+            default => self::FORMAT_HLS,
+        };
+
+        return $format === self::FORMAT_MP4 ? self::FORMAT_MP4 : self::FORMAT_HLS;
+    }
+
+    /**
      * Validates a literal (or resolved) Bunny library ID or delivery hostname.
      *
      * Environment references that are unset here pass, because another
@@ -349,6 +401,7 @@ class Settings extends Model
         ];
         $rules[] = [['bunnyLibraryId', 'bunnyCdnHostname'], 'validateBunnyConnection'];
         $rules[] = [['videoProvider'], 'in', 'range' => self::VIDEO_PROVIDERS];
+        $rules[] = [['muxDefaultPlaybackFormat', 'bunnyDefaultPlaybackFormat'], 'in', 'range' => self::PLAYBACK_FORMATS];
         $rules[] = [['selfHostBaseUrl'], 'string'];
         $rules[] = [['defaultVolumeUid', 'attachmentsVolumeUid', 'sidecarVolumeUid'], 'string', 'max' => 36];
         $rules[] = [

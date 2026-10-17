@@ -56,7 +56,8 @@ class WebhooksController extends Controller
      * Handles a Mux webhook delivery.
      *
      * Applies `video.asset.*` events (ready, errored, updated, deleted) to the
-     * matching media item. Events for unknown assets and unhandled event types
+     * matching media item. Static rendition events refresh the asset from the
+     * API, since their payload describes a single file. Events for unknown assets and unhandled event types
      * are acknowledged with 200 so Mux does not re-deliver them.
      *
      * @return Response
@@ -104,6 +105,24 @@ class WebhooksController extends Controller
 
         $state = Mux::mapWebhookAssetData($data);
 
+        if (self::isRenditionEvent($type)) {
+            // Rendition payloads describe one file, so refresh the whole asset.
+            $assetId = self::renditionAssetId($type, $event);
+
+            if ($assetId === '' || !$plugin->getMediaItems()->getByMuxAssetId($assetId)) {
+                return $this->asJson(['ok' => true, 'handled' => false]);
+            }
+
+            try {
+                $state = $mux->getAsset($assetId);
+            } catch (\Throwable $e) {
+                Craft::error("Mux rendition refresh failed: {$e->getMessage()}", __METHOD__);
+                Craft::$app->getResponse()->setStatusCode(503);
+
+                return $this->asJson(['ok' => false, 'handled' => false]);
+            }
+        }
+
         if ($state['assetId'] === '') {
             return $this->asJson(['ok' => true, 'handled' => false]);
         }
@@ -132,5 +151,52 @@ class WebhooksController extends Controller
         }
 
         return $this->asJson(['ok' => true, 'handled' => $record !== null]);
+    }
+
+    /**
+     * Returns whether a Mux event is about static (MP4) renditions.
+     *
+     * Covers the per-file `video.asset.static_rendition.*` events and the
+     * legacy `video.asset.static_renditions.*` aggregate events.
+     *
+     * @param string $type the event type
+     * @return bool
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public static function isRenditionEvent(string $type): bool
+    {
+        return str_starts_with($type, 'video.asset.static_rendition.')
+            || str_starts_with($type, 'video.asset.static_renditions.');
+    }
+
+    /**
+     * Returns the Mux asset ID a rendition event belongs to.
+     *
+     * Per-file events carry a rendition ID in `data.id`, so only legacy
+     * aggregate events may fall back to it.
+     *
+     * @param string $type the event type
+     * @param array $event the decoded event
+     * @return string an empty string when the event names no asset
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public static function renditionAssetId(string $type, array $event): string
+    {
+        $data = is_array($event['data'] ?? null) ? $event['data'] : [];
+        $assetId = (string)($data['asset_id'] ?? '');
+
+        if ($assetId === '' && str_starts_with($type, 'video.asset.static_renditions.')) {
+            $assetId = (string)($data['id'] ?? '');
+        }
+
+        if ($assetId === '' && ($event['object']['type'] ?? null) === 'asset') {
+            $assetId = (string)($event['object']['id'] ?? '');
+        }
+
+        return $assetId;
     }
 }

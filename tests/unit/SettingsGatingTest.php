@@ -49,6 +49,29 @@ class SettingsGatingTest extends TestCase
         $this->assertNull($settings->bunnyCdnHostname);
     }
 
+    public function testPlaybackFormatsDefaultToHlsAndValidate(): void
+    {
+        if (\Yii::$app === null) {
+            new \yii\console\Application([
+                'id' => 'polymedia-tests',
+                'basePath' => dirname(__DIR__, 2),
+            ]);
+        }
+
+        $settings = new Settings();
+        $this->assertSame('hls', $settings->getDefaultPlaybackFormat('mux'));
+        $this->assertSame('hls', $settings->getDefaultPlaybackFormat('bunny'));
+        $this->assertSame('hls', $settings->getDefaultPlaybackFormat('youtube'));
+
+        $settings->bunnyDefaultPlaybackFormat = 'mp4';
+        $this->assertSame('mp4', $settings->getDefaultPlaybackFormat('bunny'));
+        $this->assertTrue($settings->validate(['muxDefaultPlaybackFormat', 'bunnyDefaultPlaybackFormat']));
+
+        $settings->muxDefaultPlaybackFormat = 'iframe';
+        $this->assertFalse($settings->validate(['muxDefaultPlaybackFormat']));
+        $this->assertSame('hls', $settings->getDefaultPlaybackFormat('mux'));
+    }
+
     public function testBunnySettingsValidation(): void
     {
         if (\Yii::$app === null) {

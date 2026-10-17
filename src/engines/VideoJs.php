@@ -238,11 +238,23 @@ class VideoJs extends PlayerEngine
      */
     private function _media(RenderContext $context, array $attrs, bool $withTracks): string
     {
-        $tag = self::MEDIA[$context->type][0] ?? $context->elementTag;
+        $tag = self::MEDIA[$this->_mediaType($context)][0] ?? $context->elementTag;
 
         return Html::beginTag($tag, $attrs)
             . ($withTracks ? $this->tracksHtml($context->tracks) : '')
             . Html::endTag($tag);
+    }
+
+    /**
+     * Returns the type whose v10 element renders the item: `mp4` when an MP4
+     * plays (including a hosted item's rendition), else the provider type.
+     *
+     * @param RenderContext $context the resolved item
+     * @return string
+     */
+    private function _mediaType(RenderContext $context): string
+    {
+        return $context->format === 'mp4' ? 'mp4' : $context->type;
     }
 
     /**
@@ -255,19 +267,19 @@ class VideoJs extends PlayerEngine
      */
     private function _mediaAttributes(RenderContext $context, bool $controls, bool $poster): array
     {
-        $manifest = $context->manifest;
-        $providerId = (string)($manifest['providerId'] ?? '');
+        $isMux = $this->_mediaType($context) === 'mux';
+        $providerId = (string)($context->manifest['providerId'] ?? '');
         $attrs = [
             // v10's Mux element has no playback-id attribute.
-            'src' => $context->type === 'mux' && $providerId !== ''
+            'src' => $isMux && $providerId !== ''
                 ? 'https://stream.mux.com/' . rawurlencode($providerId) . '.m3u8'
-                : ($manifest['url'] ?? ''),
+                : $context->src,
         ];
 
         $attrs += $this->playbackAttributes($context->settings, $controls);
 
         // Mux timeline thumbnails are cross-origin images.
-        if ($context->type === 'mux') {
+        if ($isMux) {
             $attrs['crossorigin'] ??= 'anonymous';
         }
 

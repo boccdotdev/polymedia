@@ -438,6 +438,55 @@ class RendererOutputTest extends TestCase
         return $types;
     }
 
+    public function testMp4PreferenceRendersTheRenditionOnBothEngines(): void
+    {
+        $manifest = self::_manifest('mux', 'https://stream.mux.com/pb1.m3u8', 'pb1', 'mux-video', [
+            'mp4Renditions' => [['url' => 'https://stream.mux.com/pb1/highest.mp4', 'status' => 'ready', 'width' => 1920, 'height' => 1080]],
+        ]);
+        $this->_given($manifest, ['element' => 'mux-video'], null, []);
+        $options = ['poster' => false, 'mediaAttrs' => ['SRC' => 'bad', 'playback-id' => 'bad', 'type' => 'application/x-mpegURL', 'data-x' => '1']];
+
+        // HLS stays the default and keeps the canonical stream.
+        $hls = (string)(new Renderer())->element($this->_polymediaAsset(), $options);
+        $this->assertStringContainsString('<mux-video playback-id="pb1"', $hls);
+        $this->assertStringNotContainsString('bad', $hls);
+        $this->assertStringContainsString('data-x="1"', $hls);
+
+        $mediaChrome = (string)(new Renderer())->player($this->_polymediaAsset(), $options + ['playbackFormat' => 'mp4']);
+        $this->assertStringContainsString('<media-controller><video src="https://stream.mux.com/pb1/highest.mp4" slot="media"', $mediaChrome);
+        $this->assertStringNotContainsString('bad', $mediaChrome);
+        $this->assertStringNotContainsString('application/x-mpegURL', $mediaChrome);
+
+        $this->_settings->muxDefaultPlaybackFormat = Settings::FORMAT_MP4;
+        $this->_settings->playerEngine = Settings::ENGINE_VIDEOJS;
+        $videojs = (string)(new Renderer())->player($this->_polymediaAsset(), ['poster' => false]);
+        $this->assertStringContainsString('<video src="https://stream.mux.com/pb1/highest.mp4"', $videojs);
+        $this->assertStringNotContainsString('mux-video', $videojs);
+        $this->assertStringNotContainsString('crossorigin', $videojs);
+
+        // A template can still ask for HLS.
+        $stream = (string)(new Renderer())->element($this->_polymediaAsset(), ['playbackFormat' => 'hls']);
+        $this->assertStringContainsString('<mux-video src="https://stream.mux.com/pb1.m3u8"', $stream);
+    }
+
+    public function testMp4PreferenceFallsBackToHlsWithoutAReadyRendition(): void
+    {
+        $this->_settings->muxDefaultPlaybackFormat = Settings::FORMAT_MP4;
+        $this->_given(self::_manifest('mux', 'https://stream.mux.com/pb1.m3u8', 'pb1', 'mux-video', [
+            'mp4Renditions' => [['url' => 'https://stream.mux.com/pb1/highest.mp4', 'status' => 'preparing']],
+        ]), ['element' => 'mux-video'], null, []);
+
+        $this->assertStringContainsString('<mux-video slot="media" playback-id="pb1"', (string)(new Renderer())->player($this->_polymediaAsset()));
+    }
+
+    public function testScriptsAcceptAProviderList(): void
+    {
+        $this->assertSame(
+            (string)(new Renderer())->scripts(['providers' => ['mux']]),
+            (string)(new Renderer())->scripts(['mux']),
+        );
+    }
+
     /**
      * @dataProvider videojsElementCases
      */

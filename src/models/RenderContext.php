@@ -16,8 +16,8 @@ use craft\base\Model;
 /**
  * Everything a player engine needs to render one media item.
  *
- * The Renderer resolves it once (manifest, merged playback settings, poster,
- * tracks, aspect ratio) so engines only decide markup.
+ * The Renderer resolves it once (manifest, playback source, merged playback
+ * settings, poster, tracks, aspect ratio) so engines only decide markup.
  *
  * @author boccdotdev
  * @since 2.4.0
@@ -38,9 +38,24 @@ class RenderContext extends Model
     public string $type = '';
 
     /**
-     * @var string The media element tag stored for the item (`mux-video`, `video`, …).
+     * @var string The media element tag to render (`mux-video`, `video`, …):
+     * the stored element, or `video` when an MP4 rendition plays.
      */
     public string $elementTag = 'video';
+
+    /**
+     * @var string The URL the media element loads. Usually the manifest URL;
+     * an MP4 rendition when MP4 playback applies.
+     * @since 2.5.0
+     */
+    public string $src = '';
+
+    /**
+     * @var ?string The playback format, `hls` or `mp4`, or null for providers
+     * that aren't a stream or a file (embeds, DASH, audio).
+     * @since 2.5.0
+     */
+    public ?string $format = null;
 
     /**
      * @var bool Whether the type is audio-only.

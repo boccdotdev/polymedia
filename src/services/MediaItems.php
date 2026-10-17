@@ -426,7 +426,7 @@ class MediaItems extends Component
      *
      * The one idempotent, lock-guarded transition shared by the CP
      * import/upload flow, console sync command, and webhook endpoint: stores
-     * `muxStatus`/`muxAssetId`/`aspectRatio` metadata, updates the duration
+     * `muxStatus`/`muxAssetId`/`aspectRatio`/`mp4Renditions` metadata, updates the duration
      * and video dimensions, and kicks the poster fetcher once the asset is ready.
      *
      * @param string $muxAssetId the Mux asset id
@@ -517,7 +517,8 @@ class MediaItems extends Component
      * @param array<string, mixed> $metadata current metadata
      * @param ?int $duration current duration in seconds
      * @param string $muxAssetId the Mux asset id
-     * @param array $state incoming state (`status`, `duration`, `aspectRatio`)
+     * @param array $state incoming state (`status`, `duration`, `aspectRatio`,
+     *                     `mp4Renditions`)
      * @return array{metadata: array<string, mixed>, duration: ?int, changed: bool}
      *
      * @author boccdotdev
@@ -536,6 +537,14 @@ class MediaItems extends Component
 
         if ($status !== '' && ($metadata['muxStatus'] ?? null) !== $status) {
             $metadata['muxStatus'] = $status;
+            $changed = true;
+        }
+
+        // Absent means unknown (a partial event), not "no renditions".
+        if (isset($state['mp4Renditions']) && is_array($state['mp4Renditions'])
+            && ($metadata['mp4Renditions'] ?? null) !== $state['mp4Renditions']
+        ) {
+            $metadata['mp4Renditions'] = $state['mp4Renditions'];
             $changed = true;
         }
 
