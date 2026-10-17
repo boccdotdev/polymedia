@@ -8,6 +8,8 @@
 
 namespace boccdotdev\polymedia\tests\unit;
 
+use boccdotdev\polymedia\engines\MediaChrome;
+use boccdotdev\polymedia\engines\VideoJs;
 use boccdotdev\polymedia\models\Settings;
 use boccdotdev\polymedia\Plugin;
 use boccdotdev\polymedia\records\MediaItemRecord;
@@ -66,6 +68,10 @@ class RendererOutputTest extends TestCase
      */
     private Settings $_settings;
 
+    /**
+     * @var string the current site's language
+     */
+    private string $_language = 'en-US';
 
     // Public Methods
     // =========================================================================
@@ -82,7 +88,7 @@ class RendererOutputTest extends TestCase
             return $trackAssets[$id] ?? null;
         });
         $sites = $this->createMock(\craft\services\Sites::class);
-        $sites->method('getCurrentSite')->willReturn(new Site(['id' => 1]));
+        $sites->method('getCurrentSite')->willReturnCallback(fn() => new Site(['id' => 1, 'language' => $this->_language]));
         $app = $this->getMockBuilder(\craft\web\Application::class)
             ->disableOriginalConstructor()->onlyMethods(['getAssets', 'getSites'])->getMock();
         $app->method('getAssets')->willReturn($assets);
@@ -284,6 +290,205 @@ class RendererOutputTest extends TestCase
             'mode option overrides setting' => ['mode-option', ['scriptLoaderMode' => 'self-host'], ['mode' => 'cdn', 'providers' => []]],
             'none' => ['none', ['scriptLoaderMode' => 'none'], []],
             'peertube package' => ['cdn-peertube', [], ['providers' => ['peertube']]],
+        ];
+    }
+
+    /**
+     * @dataProvider videojsPlayerCases
+     */
+    public function testVideojsPlayer(string $name, array $manifest, array $options, ?string $posterUrl, array $tracks, string $language = 'en-US'): void
+    {
+        $this->_settings->playerEngine = Settings::ENGINE_VIDEOJS;
+        $this->_language = $language;
+        $this->_given($manifest, ['element' => $manifest['element']], $posterUrl, $tracks);
+        $this->_assertSnapshot("videojs-player-{$name}", (string)(new Renderer())->player($this->_polymediaAsset(), $options));
+    }
+
+    public static function videojsPlayerCases(): array
+    {
+        $mux = self::_manifest('mux', 'https://stream.mux.com/pb1.m3u8', 'pb1', 'mux-video', [
+            'thumbnail' => 'https://image.mux.com/pb1/thumbnail.jpg?time=0',
+        ]);
+        $vertical = self::_manifest('mux', 'https://stream.mux.com/pb2.m3u8', 'pb2', 'mux-video', [
+            'thumbnail' => 'https://image.mux.com/pb2/thumbnail.jpg?time=0',
+            'aspectRatio' => '9:16',
+        ]);
+        $captions = [
+            'captions' => [
+                ['siteId' => 1, 'url' => 'https://example.test/en.vtt', 'srclang' => 'en', 'label' => 'English'],
+            ],
+        ];
+        $controls = '<media-controls><media-play-button></media-play-button></media-controls>';
+
+        return [
+            'mux' => ['mux', $mux, [], null, []],
+            'stored ratio and attached poster' => ['vertical', $vertical, [], 'https://example.test/poster.jpg', []],
+            'hls uses hls.js element' => ['hls', self::_manifest('hls', 'https://example.test/v.m3u8', '', 'hls-video'), [], null, []],
+            'youtube' => ['youtube', self::_manifest('youtube', 'https://www.youtube.com/watch?v=abc', 'abc', 'youtube-video'), [], null, []],
+            'mp4 ratio from dimensions' => ['mp4-dimensions', ['width' => 1080, 'height' => 1350] + self::_manifest('mp4', 'https://example.test/v.mp4', '', 'video'), [], null, []],
+            'audio' => ['audio', self::_manifest('audio', 'https://example.test/a.mp3', '', 'audio', [
+                'thumbnail' => 'https://example.test/cover.jpg',
+            ]), [], null, []],
+            'spotify standalone' => ['spotify', self::_manifest('spotify', 'https://open.spotify.com/track/t1', 't1', 'spotify-audio'), [], null, []],
+            'jwplayer standalone' => ['jwplayer', self::_manifest('jwplayer', 'https://cdn.jwplayer.com/players/a-b.html', 'a', 'jwplayer-video', [
+                'thumbnail' => 'https://example.test/jw.jpg',
+            ]), ['class' => 'embed'], null, []],
+            'standalone ratio option' => ['peertube-ratio', self::_manifest('peertube', 'https://framatube.org/w/abc', 'abc', 'peertube-video', [
+                'aspectRatio' => '9:16',
+            ]), ['aspectRatio' => '4 / 3'], null, []],
+            'children make a custom player' => ['custom', $mux, ['children' => $controls], null, []],
+            'skin option' => ['skin-neutral', $mux, ['skin' => 'neutral'], null, []],
+            'unknown skin falls back' => ['skin-unknown', $mux, ['skin' => 'glass'], null, []],
+            'options' => ['options', $mux, [
+                'class' => 'hero-player',
+                'id' => 'hero',
+                'attrs' => ['data-theme' => 'dark', 'style' => 'max-width: 40rem'],
+                'mediaAttrs' => ['data-index' => '2'],
+                'autoplay' => true,
+                'loop' => true,
+                'muted' => true,
+                'controls' => true,
+                'playsinline' => false,
+                'preload' => 'none',
+                'crossorigin' => 'use-credentials',
+            ], null, []],
+            'aspect ratio off' => ['ratio-off', $vertical, ['aspectRatio' => false], null, []],
+            'aspect ratio option' => ['ratio-option', $vertical, ['aspectRatio' => '4 / 3'], null, []],
+            'template style ratio wins' => ['ratio-style', $vertical, ['attrs' => ['style' => ['aspect-ratio' => '1']]], null, []],
+            'tracks' => ['tracks', $mux, [], null, $captions],
+            'site locale' => ['locale-site', $mux, [], null, [], 'fr-FR'],
+            'locale off' => ['locale-off', $mux, ['locale' => false], null, [], 'fr-FR'],
+            'locale option' => ['locale-option', $mux, ['locale' => 'pt-br'], null, []],
+            'unsupported locale' => ['locale-unsupported', $mux, [], null, [], 'xh-ZA'],
+            'standalone skips locale' => ['locale-standalone', self::_manifest('spotify', 'https://open.spotify.com/track/t1', 't1', 'spotify-audio'), [], null, [], 'fr-FR'],
+            'audio with children' => ['audio-children', self::_manifest('audio', 'https://example.test/a.mp3', '', 'audio'), ['children' => $controls], null, []],
+            'escaped values' => ['escaped', self::_manifest('mux', 'https://stream.mux.com/x.m3u8', 'pb"><script>1</script>', 'mux-video', [
+                'thumbnail' => 'https://example.test/p.jpg?a=1&b="2"',
+                'aspectRatio' => '16:9',
+            ]), ['class' => 'a" onclick="x', 'aspectRatio' => '1; background: url(x)'], null, []],
+        ];
+    }
+
+    public function testVideojsUnknownSkinFallsBackToConfiguredSkin(): void
+    {
+        $this->_settings->playerEngine = Settings::ENGINE_VIDEOJS;
+        $this->_settings->videojsSkin = 'neutral';
+        $this->_given(self::_manifest('mp4', 'https://example.test/v.mp4', '', 'video'), ['element' => 'video'], null, []);
+
+        foreach (['glass', ''] as $skin) {
+            $html = (string)(new Renderer())->player($this->_polymediaAsset(), ['skin' => $skin]);
+            $this->assertStringContainsString('<video-neutral-skin ', $html, "skin '{$skin}'");
+        }
+    }
+
+    public function testVideojsSkinHandlesMatchSettings(): void
+    {
+        $this->assertSame(Settings::VIDEOJS_SKINS, array_keys(VideoJs::SKINS));
+    }
+
+    public function testEngineFollowsEnvironmentVariable(): void
+    {
+        $this->_given(self::_manifest('mp4', 'https://example.test/v.mp4', '', 'video'), ['element' => 'video'], null, []);
+        $this->_settings->playerEngine = '$POLYMEDIA_TEST_ENGINE';
+        $_SERVER['POLYMEDIA_TEST_ENGINE'] = 'videojs';
+
+        try {
+            $this->assertStringStartsWith('<video-player>', (string)(new Renderer())->player($this->_polymediaAsset()));
+        } finally {
+            unset($_SERVER['POLYMEDIA_TEST_ENGINE']);
+        }
+
+        // Unset falls back to Media Chrome.
+        $this->assertStringStartsWith('<media-controller>', (string)(new Renderer())->player($this->_polymediaAsset()));
+    }
+
+    /**
+     * @dataProvider providerTypes
+     */
+    public function testEveryProviderRendersOnBothEngines(string $type): void
+    {
+        $element = (new UrlDetector())->getElementMap()[$type];
+        $this->_given(self::_manifest($type, "https://example.test/{$type}", 'id1', $element), ['element' => $element], null, []);
+
+        $this->assertStringContainsString("<{$element} ", (string)(new Renderer())->player($this->_polymediaAsset()));
+        $this->assertTrue(
+            in_array($type, ['mp4', 'audio'], true) || isset(MediaChrome::SCRIPT_MAP[$type]),
+            "Media Chrome has no script for {$type}.",
+        );
+
+        $this->_settings->playerEngine = Settings::ENGINE_VIDEOJS;
+        $tag = VideoJs::MEDIA[$type][0] ?? $element;
+        $this->assertStringContainsString("<{$tag} ", (string)(new Renderer())->player($this->_polymediaAsset()));
+        $this->assertTrue(
+            in_array($type, ['mp4', 'audio'], true)
+                || isset(VideoJs::MEDIA[$type])
+                || isset(VideoJs::STANDALONE_PACKAGES[$type]),
+            "Video.js has no script for {$type}.",
+        );
+    }
+
+    public static function providerTypes(): array
+    {
+        $types = [];
+
+        foreach ((new UrlDetector())->getProviderTypes() as $type) {
+            $types[$type] = [$type];
+        }
+
+        return $types;
+    }
+
+    /**
+     * @dataProvider videojsElementCases
+     */
+    public function testVideojsElement(string $name, array $manifest, array $options): void
+    {
+        $this->_settings->playerEngine = Settings::ENGINE_VIDEOJS;
+        $this->_given($manifest, ['element' => $manifest['element']], null, []);
+        $this->_assertSnapshot("videojs-element-{$name}", (string)(new Renderer())->element($this->_polymediaAsset(), $options));
+    }
+
+    public static function videojsElementCases(): array
+    {
+        $mux = self::_manifest('mux', 'https://stream.mux.com/pb1.m3u8', 'pb1', 'mux-video', [
+            'thumbnail' => 'https://image.mux.com/pb1/thumbnail.jpg?time=0',
+        ]);
+
+        return [
+            'mux' => ['mux', $mux, []],
+            'hls' => ['hls', self::_manifest('hls', 'https://example.test/v.m3u8', '', 'hls-video'), ['controls' => false, 'muted' => true]],
+            'audio' => ['audio', self::_manifest('audio', 'https://example.test/a.mp3', '', 'audio'), []],
+        ];
+    }
+
+    /**
+     * @dataProvider videojsScriptCases
+     */
+    public function testVideojsScripts(string $name, array $settings, array $options, string $language = 'en-US'): void
+    {
+        $this->_settings->playerEngine = Settings::ENGINE_VIDEOJS;
+        $this->_settings->setAttributes($settings, false);
+        $this->_language = $language;
+        $this->_assertSnapshot("videojs-scripts-{$name}", (string)(new Renderer())->scripts($options));
+    }
+
+    public static function videojsScriptCases(): array
+    {
+        return [
+            'cdn defaults' => ['cdn-defaults', [], []],
+            'providers' => ['providers', [], ['providers' => ['mux', 'audio', 'spotify', 'jwplayer', 'peertube', 'videojs', 'mp4', 'unknown']]],
+            'skins and version options' => ['skins', ['videojsSkin' => 'compat'], ['skins' => ['default', 'neutral'], 'version' => '10.2.0', 'providers' => ['audio']]],
+            'skins add to the setting' => ['skins-additive', [], ['skins' => 'neutral', 'providers' => []]],
+            'skin setting' => ['skin-setting', ['videojsSkin' => 'neutral'], ['providers' => []]],
+            'self-host' => ['self-host', [
+                'scriptLoaderMode' => 'self-host',
+                'selfHostBaseUrl' => 'https://example.test/videojs/',
+            ], ['providers' => ['mux', 'jwplayer']]],
+            'site locale' => ['locale-site', [], ['providers' => []], 'de-AT'],
+            'locale off' => ['locale-off', [], ['providers' => [], 'locale' => false], 'de-AT'],
+            'locale option' => ['locale-option', [], ['providers' => [], 'locale' => 'zh-tw']],
+            'none' => ['none', ['scriptLoaderMode' => 'none'], []],
+            'unknown mode' => ['unknown-mode', [], ['mode' => 'bundle']],
         ];
     }
 

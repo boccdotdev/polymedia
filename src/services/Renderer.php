@@ -13,8 +13,10 @@ namespace boccdotdev\polymedia\services;
 
 use boccdotdev\polymedia\base\PlayerEngineInterface;
 use boccdotdev\polymedia\engines\MediaChrome;
+use boccdotdev\polymedia\engines\VideoJs;
 use boccdotdev\polymedia\models\PlayerSettings;
 use boccdotdev\polymedia\models\RenderContext;
+use boccdotdev\polymedia\models\Settings;
 use boccdotdev\polymedia\Plugin;
 use boccdotdev\polymedia\records\MediaItemRecord;
 use Craft;
@@ -47,9 +49,9 @@ class Renderer extends Component
     // =========================================================================
 
     /**
-     * @var ?PlayerEngineInterface
+     * @var array<string, PlayerEngineInterface> Engines by handle.
      */
-    private ?PlayerEngineInterface $_engine = null;
+    private array $_engines = [];
 
     // Public Methods
     // =========================================================================
@@ -60,7 +62,7 @@ class Renderer extends Component
      * @param Asset $asset the `.pmedia` asset
      * @param array $options rendering options (overrides for player settings, poster, children, etc.)
      * @return Markup the rendered HTML
-     * @throws SiteNotFoundException if tracks need the current site and there is none
+     * @throws SiteNotFoundException if tracks or the player locale need the current site and there is none
      *
      * @author boccdotdev
      * @since 1.0.0
@@ -178,8 +180,10 @@ class Renderer extends Component
     /**
      * Renders `<script type="module">` tags for the player and provider elements.
      *
-     * @param array $opts options: `providers`, `version`, `mode`
+     * @param array $opts options: `providers`, `version`, `mode`; with Video.js
+     *        also `skins` and `locale`
      * @return Markup the script tags
+     * @throws SiteNotFoundException if the Video.js locale needs the current site and there is none
      *
      * @author boccdotdev
      * @since 1.0.0
@@ -261,7 +265,7 @@ class Renderer extends Component
     }
 
     /**
-     * Returns the player engine that renders markup and script tags.
+     * Returns the player engine selected by the `playerEngine` setting.
      *
      * @return PlayerEngineInterface
      *
@@ -270,7 +274,12 @@ class Renderer extends Component
      */
     public function getEngine(): PlayerEngineInterface
     {
-        return $this->_engine ??= new MediaChrome();
+        $handle = Plugin::getInstance()->getSettings()->getPlayerEngine();
+
+        return $this->_engines[$handle] ??= match ($handle) {
+            Settings::ENGINE_VIDEOJS => new VideoJs(),
+            default => new MediaChrome(),
+        };
     }
 
     // Private Methods
