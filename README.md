@@ -76,6 +76,8 @@ In **Settings → Plugins → Polymedia → Video Hosting**, choose **Mux** or *
 
 Existing assets keep their own provider and playback URL when you change this setting; nothing is moved. Keep the old provider's credentials while its assets still need syncing or remote deletion.
 
+**Upload video** keeps each upload session in Craft's cache for up to six hours, between starting the upload and completing it. On load-balanced hosting, use a cache all servers share (Redis, or Craft's database cache) so the completion request finds the session. Otherwise completion fails with "upload session unavailable" and the video stays in the provider library, where **Browse video library** can import it.
+
 Imported and uploaded videos show their media URL and type as read-only technical details on the asset edit screen. Authors edit the title, poster and tracks, not the provider identity.
 
 ### Reference an existing Craft video
@@ -124,7 +126,7 @@ php craft polymedia/bunny/sync --video-id=<guid>
 
 **Webhooks (optional):** put the library's **read-only API key** in your environment and select its reference under **Bunny Webhook Verification Key**. Then copy the **Bunny Webhook URL** shown in the settings (`https://your-site/actions/polymedia/webhooks/bunny`) into the library's webhook setting. Polymedia verifies Bunny's signature over the raw request body, refreshes only videos that are already imported, and ignores the status code in the payload (it re-reads the video from the API). Unknown videos are acknowledged and ignored; temporary failures answer `503` so Bunny retries. The endpoint is off while the key is empty.
 
-**Remote deletion (optional):** **Delete Bunny video when Craft asset is deleted** is off by default. When on, permanently deleting a Bunny `.pmedia` also deletes the video, but only with Pro and credentials for the library the video came from. Trashing an asset never deletes the video.
+**Remote deletion (optional):** **Delete Bunny video when Craft asset is deleted** is off by default. When on, permanently deleting a Bunny `.pmedia` also deletes the video, but only with Pro and credentials for the library the video came from. Trashing an asset never deletes the video. Craft's automatic trash purging (after `softDeleteDuration`) skips element events, so it never deletes remote videos; only deleting from the Trash, or a direct hard delete, does.
 
 ### Automatically route native MP4 uploads (Pro)
 
@@ -151,7 +153,7 @@ In those volumes, an MP4 uploaded with Craft's normal **Upload files** button or
 
 Optional setting **Delete Mux asset when Craft asset is deleted** (default **off**): when enabled, **hard-deleting** a Mux `.pmedia` also deletes the video in Mux. Soft-delete / trash never calls Mux.
 
-**Notes on delete-from-Mux:** the remote delete runs **synchronously** in the hard-delete request (not a queue job). Deleting many Mux items at once may take longer. If the site is on **Lite** or credentials are missing while this setting is still on, Craft logs a **warning** and skips the Mux API call (the remote asset may remain until deleted in Mux).
+**Notes on delete-from-Mux:** the remote delete runs **synchronously** in the hard-delete request (not a queue job). Deleting many Mux items at once may take longer. If the site is on **Lite** or credentials are missing while this setting is still on, Craft logs a **warning** and skips the Mux API call (the remote asset may remain until deleted in Mux). Craft's automatic trash purging (after `softDeleteDuration`) skips element events, so it never deletes remote videos; only deleting from the Trash, or a direct hard delete, does.
 
 ### Mux status updates: polling, sync, and webhooks (Pro)
 

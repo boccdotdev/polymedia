@@ -312,7 +312,7 @@
 
         {{ forms.lightswitchField({
             label: 'Delete Mux asset when Craft asset is deleted'|t('polymedia'),
-            instructions: 'When enabled, hard-deleting a Mux `.pmedia` asset also deletes the video from your Mux account. Soft-delete / trash is never sent to Mux. Default off.'|t('polymedia'),
+            instructions: 'When enabled, hard-deleting a Mux `.pmedia` asset also deletes the video from your Mux account. Soft-delete / trash is never sent to Mux, and Craft’s automatic trash purging doesn’t delete remote videos. Default off.'|t('polymedia'),
             id: 'deleteMuxAssetOnDelete',
             name: 'deleteMuxAssetOnDelete',
             on: settings.deleteMuxAssetOnDelete,
@@ -401,7 +401,7 @@
 
         {{ forms.lightswitchField({
             label: 'Delete Bunny video when Craft asset is deleted'|t('polymedia'),
-            instructions: 'When enabled, hard-deleting a Bunny `.pmedia` asset also deletes the video from its Bunny library, as long as these credentials belong to that library. Trashing an asset never deletes the video. Default off.'|t('polymedia'),
+            instructions: 'When enabled, hard-deleting a Bunny `.pmedia` asset also deletes the video from its Bunny library, as long as these credentials belong to that library. Trashing an asset never deletes the video, and Craft’s automatic trash purging doesn’t either. Default off.'|t('polymedia'),
             id: 'deleteBunnyAssetOnDelete',
             name: 'deleteBunnyAssetOnDelete',
             on: settings.deleteBunnyAssetOnDelete,
