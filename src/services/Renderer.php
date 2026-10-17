@@ -562,13 +562,7 @@ class Renderer extends Component
         $html = '';
 
         foreach (['captions', 'subtitles', 'descriptions'] as $role) {
-            $relatedRecords = \boccdotdev\polymedia\records\RelatedAssetRecord::findAll(
-                array_filter([
-                    'itemId' => $record->id,
-                    'role' => $role,
-                    'siteId' => $siteId,
-                ]),
-            );
+            $relatedRecords = Plugin::getInstance()->getRelatedAssets()->getTrackRecords((int)$record->id, $role, $siteId);
 
             foreach ($relatedRecords as $related) {
                 $trackAsset = Craft::$app->getAssets()->getAssetById($related->assetId);
