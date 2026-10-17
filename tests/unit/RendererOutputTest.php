@@ -283,6 +283,7 @@ class RendererOutputTest extends TestCase
             ], []],
             'mode option overrides setting' => ['mode-option', ['scriptLoaderMode' => 'self-host'], ['mode' => 'cdn', 'providers' => []]],
             'none' => ['none', ['scriptLoaderMode' => 'none'], []],
+            'peertube package' => ['cdn-peertube', [], ['providers' => ['peertube']]],
         ];
     }
 
