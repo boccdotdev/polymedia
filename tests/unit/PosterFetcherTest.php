@@ -27,6 +27,11 @@ class PosterFetcherTest extends TestCase
      */
     private PosterFetcher $_fetcher;
 
+    /**
+     * @var mixed
+     */
+    private mixed $_previousApp;
+
     // Public Methods
     // =========================================================================
 
@@ -34,6 +39,19 @@ class PosterFetcherTest extends TestCase
     {
         parent::setUp();
         $this->_fetcher = new PosterFetcher();
+        // Slugs read the app language.
+        $this->_previousApp = \Craft::$app;
+        new \yii\console\Application([
+            'id' => 'poster-fetcher-tests',
+            'basePath' => dirname(__DIR__, 2),
+            'language' => 'en',
+        ]);
+    }
+
+    protected function tearDown(): void
+    {
+        \Craft::$app = $this->_previousApp;
+        parent::tearDown();
     }
 
     public function testBackoffSecondsGrowsThenCaps(): void
@@ -52,5 +70,29 @@ class PosterFetcherTest extends TestCase
         $this->assertTrue($this->_fetcher->shouldSkipAutoFetch($poster, false));
         $this->assertFalse($this->_fetcher->shouldSkipAutoFetch($poster, true));
         $this->assertFalse($this->_fetcher->shouldSkipAutoFetch(null, false));
+    }
+
+    public function testPosterFilenameChangesWithTheImage(): void
+    {
+        $black = tempnam(sys_get_temp_dir(), 'pm');
+        $frame = tempnam(sys_get_temp_dir(), 'pm');
+        file_put_contents($black, 'black frame');
+        file_put_contents($frame, 'frame at four seconds');
+
+        try {
+            $first = $this->_fetcher->posterFilename('Holding Reel', $black, 'jpg');
+
+            $this->assertMatchesRegularExpression('/^holding-reel-poster-[0-9a-f]{8}\.jpg$/', $first);
+            $this->assertSame($first, $this->_fetcher->posterFilename('Holding Reel', $black, 'jpg'));
+            $this->assertNotSame($first, $this->_fetcher->posterFilename('Holding Reel', $frame, 'jpg'));
+        } finally {
+            @unlink($black);
+            @unlink($frame);
+        }
+    }
+
+    public function testPosterFilenameFallsBackWithoutTitleOrFile(): void
+    {
+        $this->assertSame('poster-poster.png', $this->_fetcher->posterFilename('', '/nonexistent/polymedia', 'png'));
     }
 }

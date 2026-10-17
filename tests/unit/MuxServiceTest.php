@@ -13,6 +13,7 @@ use MuxPhp\Models\Asset;
 use MuxPhp\Models\AssetMetadata;
 use MuxPhp\Models\PlaybackID;
 use MuxPhp\Models\PlaybackPolicy;
+use MuxPhp\Models\Track;
 use MuxPhp\Models\Upload;
 use PHPUnit\Framework\TestCase;
 
@@ -76,6 +77,10 @@ class MuxServiceTest extends TestCase
             'status' => Asset::STATUS_READY,
             'duration' => 12.5,
             'aspect_ratio' => '16:9',
+            'tracks' => [
+                new Track(['type' => Track::TYPE_AUDIO]),
+                new Track(['type' => Track::TYPE_VIDEO, 'max_width' => 1920, 'max_height' => 1080]),
+            ],
             'created_at' => '1700000000',
             'meta' => new AssetMetadata(['title' => 'Demo']),
             'playback_ids' => [
@@ -98,6 +103,9 @@ class MuxServiceTest extends TestCase
         $this->assertSame('Demo', $mapped['title']);
         $this->assertSame('ready', $mapped['status']);
         $this->assertSame(12.5, $mapped['duration']);
+        $this->assertSame('16:9', $mapped['aspectRatio']);
+        $this->assertSame(1920, $mapped['width']);
+        $this->assertSame(1080, $mapped['height']);
         $this->assertSame(
             'https://image.mux.com/public_id/thumbnail.jpg?time=0',
             $mapped['thumbnailUrl'],

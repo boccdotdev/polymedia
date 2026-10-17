@@ -164,6 +164,10 @@ class PosterFetcher extends Component
                     throw $e;
                 }
 
+                if ($current) {
+                    $this->_deleteReplacedPoster($current, $folder, (int)$fresh->id);
+                }
+
                 return ['poster' => $poster, 'persist' => true];
             });
 
@@ -367,6 +371,35 @@ class PosterFetcher extends Component
         }
     }
 
+    /**
+     * Builds a poster filename that changes whenever the image does.
+     *
+     * A forced re-fetch saves the new poster next to the one it replaces, and
+     * a new URL keeps CDNs from serving the old image after the swap.
+     *
+     * @param string $title the media item title
+     * @param string $path the downloaded image
+     * @param string $extension the image extension
+     * @return string
+     *
+     * @author boccdotdev
+     * @since 2.3.0
+     */
+    public function posterFilename(string $title, string $path, string $extension): string
+    {
+        $slug = StringHelper::slugify($title !== '' ? $title : 'poster');
+
+        if ($slug === '') {
+            $slug = 'poster';
+        }
+
+        $hash = is_file($path) ? hash_file('crc32b', $path) : false;
+
+        return $hash !== false
+            ? "{$slug}-poster-{$hash}.{$extension}"
+            : "{$slug}-poster.{$extension}";
+    }
+
     // Private Methods
     // =========================================================================
 
@@ -385,14 +418,9 @@ class PosterFetcher extends Component
         int $volumeId,
         string $title,
     ): ?Asset {
-        $slug = StringHelper::slugify($title !== '' ? $title : 'poster');
-
-        if ($slug === '') {
-            $slug = 'poster';
-        }
-
-        $filename = "{$slug}-poster.{$extension}";
-        $filename = Assets::prepareAssetName($filename, true);
+        $filename = Assets::prepareAssetName($this->posterFilename($title, $tempPath, $extension), true);
+        // The same image re-fetched while its predecessor is still attached.
+        $filename = Craft::$app->getAssets()->getNameReplacementInFolder($filename, (int)$folder->id);
 
         // Keep the temp file for Craft to move; copy so callers can still unlink original.
         $uploadPath = Assets::tempFilePath($extension);
@@ -422,6 +450,35 @@ class PosterFetcher extends Component
         }
 
         return $asset;
+    }
+
+    /**
+     * Deletes a poster that a fetch replaced, when Polymedia owns the file.
+     *
+     * Only a poster in the item's own sidecar folder that nothing else
+     * references is removed. Library images an editor chose are kept.
+     *
+     * @param Asset $previous the poster that was attached before this fetch
+     * @param VolumeFolder $folder the item's sidecar folder
+     * @param int $itemId the media item ID
+     */
+    private function _deleteReplacedPoster(Asset $previous, VolumeFolder $folder, int $itemId): void
+    {
+        if ((int)$previous->folderId !== (int)$folder->id
+            || Plugin::getInstance()->getSidecarStorage()->isSharedAsset((int)$previous->id, $itemId)
+        ) {
+            return;
+        }
+
+        try {
+            Craft::$app->getElements()->deleteElement($previous, true);
+        } catch (\Throwable $e) {
+            // The new poster is attached; an orphaned file is the lesser failure.
+            Craft::warning(
+                "PosterFetcher could not delete replaced poster #{$previous->id}: {$e->getMessage()}",
+                __METHOD__,
+            );
+        }
     }
 
     private function _extensionFromContentType(string $contentType): ?string

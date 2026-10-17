@@ -86,6 +86,19 @@ class PolymediaAssetBehavior extends Behavior
     }
 
     /**
+     * Returns the media's aspect ratio as a CSS `aspect-ratio` value.
+     *
+     * @return ?string e.g. `16 / 9`, or null when unknown
+     *
+     * @author boccdotdev
+     * @since 2.3.0
+     */
+    public function getAspectRatio(): ?string
+    {
+        return Plugin::getInstance()->getRenderer()->aspectRatio($this->owner);
+    }
+
+    /**
      * Returns track-type related assets (captions, subtitles, descriptions).
      *
      * @param string $role the track role

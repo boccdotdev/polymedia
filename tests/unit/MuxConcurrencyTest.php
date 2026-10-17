@@ -48,15 +48,18 @@ class MuxConcurrencyTest extends TestCase
             public $duration;
             public $title;
             public $type;
+            public $width;
+            public $height;
 
             public function attributes(): array
             {
-                return ['id', 'assetId', 'metadata', 'duration', 'title', 'type'];
+                return ['id', 'assetId', 'metadata', 'duration', 'title', 'type', 'width', 'height'];
             }
         };
         $this->record->setAttributes([
             'id' => 7, 'assetId' => 70, 'metadata' => '{}',
             'duration' => null, 'title' => 'Example', 'type' => 'mux',
+            'width' => null, 'height' => null,
         ], false);
 
         $mutex = $this->createMock(FileMutex::class);
@@ -146,6 +149,21 @@ class MuxConcurrencyTest extends TestCase
         self::assertFalse($this->locked);
     }
 
+    public function testDimensionsAloneArePersisted(): void
+    {
+        $this->items->applyMuxAssetState('mux-1', ['status' => 'errored'], $this->record);
+        $record = clone $this->record;
+        $state = ['status' => 'errored', 'width' => 1080, 'height' => 1920];
+
+        self::assertNotNull($this->items->applyMuxAssetState('mux-1', $state, $record));
+        self::assertSame(2, $this->saves);
+        self::assertSame([1080, 1920], [$this->record->width, $this->record->height]);
+        self::assertSame([1080, 1920], [$record->width, $record->height]);
+
+        self::assertNotNull($this->items->applyMuxAssetState('mux-1', $state, $record));
+        self::assertSame(2, $this->saves);
+    }
+
     public function testStateSaveFailureIsRetryable(): void
     {
         $this->saveSucceeds = false;
@@ -232,6 +250,49 @@ class MuxConcurrencyTest extends TestCase
         $this->allowFolder();
         self::assertSame(101, $this->fetcher()->fetchForItem($this->record, 'https://example.test/poster', true)?->id);
         self::assertSame(1, $this->created);
+    }
+
+    public function testForceDeletesReplacedPosterFromItemFolder(): void
+    {
+        $this->poster = $this->asset(88, folderId: 3);
+        $this->allowFolder();
+        $this->storage->method('isSharedAsset')->with(88, 7)->willReturn(false);
+        $this->elements->expects(self::once())->method('deleteElement')
+            ->with(self::callback(fn(Asset $asset) => $asset->id === 88), true)
+            ->willReturnCallback(function(): bool {
+                self::assertTrue($this->locked);
+                self::assertSame(101, $this->poster->id, 'Delete only after the new poster is attached.');
+                return true;
+            });
+        self::assertSame(101, $this->fetcher()->fetchForItem($this->record, 'https://example.test/poster', true)?->id);
+    }
+
+    /** @dataProvider keptReplacedPosters */
+    public function testForceKeepsReplacedPosterItDoesNotOwn(int $folderId, bool $shared): void
+    {
+        $this->poster = $this->asset(88, folderId: $folderId);
+        $this->allowFolder();
+        $this->storage->method('isSharedAsset')->willReturn($shared);
+        $this->elements->expects(self::never())->method('deleteElement');
+        self::assertSame(101, $this->fetcher()->fetchForItem($this->record, 'https://example.test/poster', true)?->id);
+    }
+
+    public static function keptReplacedPosters(): array
+    {
+        return [
+            'library image' => [9, false],
+            'shared sidecar' => [3, true],
+        ];
+    }
+
+    public function testFailedDeleteOfReplacedPosterKeepsNewPoster(): void
+    {
+        $this->poster = $this->asset(88, folderId: 3);
+        $this->allowFolder();
+        $this->elements->method('deleteElement')->willThrowException(new \RuntimeException('Filesystem unavailable.'));
+        self::assertSame(101, $this->fetcher()->fetchForItem($this->record, 'https://example.test/poster', true)?->id);
+        self::assertSame(101, $this->poster->id);
+        self::assertFalse($this->locked);
     }
 
     public function testManualClearDuringForcedDownloadWins(): void
@@ -354,10 +415,11 @@ class MuxConcurrencyTest extends TestCase
         return $fetcher;
     }
 
-    private function asset(int $id): Asset
+    private function asset(int $id, ?int $folderId = null): Asset
     {
         $asset = $this->createMock(Asset::class);
         $asset->id = $id;
+        $asset->folderId = $folderId;
         return $asset;
     }
 }
