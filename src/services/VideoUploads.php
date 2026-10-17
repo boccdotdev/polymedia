@@ -120,7 +120,8 @@ class VideoUploads extends Component
      * double submit never creates two provider videos.
      *
      * @param string $provider `mux` or `bunny`
-     * @param callable(): array $create creates the provider upload; must return `uploadId`
+     * @param callable(int): array $create creates the provider upload from the
+     *        context's remaining lifetime in seconds; must return `uploadId`
      * @return array the provider upload plus the authorized `folderId`
      * @throws ForbiddenHttpException when the upload context is missing, expired or no longer authorized
      * @throws BadRequestHttpException when the context's field isn't an Assets field
@@ -143,7 +144,7 @@ class VideoUploads extends Component
             $upload = Craft::$app->getCache()->get($key);
 
             if (!is_array($upload)) {
-                $upload = $create();
+                $upload = $create(max(1, $context['expires'] - time()));
 
                 if (empty($upload['uploadId'])) {
                     throw new \RuntimeException('The video provider did not return an upload ID.');

@@ -269,6 +269,16 @@ class BunnyServiceTest extends TestCase
         self::assertLessThanOrEqual(time() + 86400, (int)$upload['headers']['AuthorizationExpire']);
     }
 
+    public function testDirectUploadSignatureHonoursExpiresIn(): void
+    {
+        $upload = $this->_service([new Response(200, [], json_encode($this->_video()))])
+            ->createDirectUpload('Title', ['expiresIn' => 3600]);
+        $expires = (int)$upload['headers']['AuthorizationExpire'];
+
+        self::assertGreaterThanOrEqual(time() + 3590, $expires);
+        self::assertLessThanOrEqual(time() + 3600, $expires);
+    }
+
     public function testDirectUploadRejectsAnotherLibrarysVideo(): void
     {
         $this->expectException(\RuntimeException::class);

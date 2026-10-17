@@ -156,7 +156,8 @@ class BunnyController extends Controller
         try {
             $upload = $plugin->getVideoUploads()->createUpload(
                 Settings::PROVIDER_BUNNY,
-                fn(): array => $plugin->getBunny()->createDirectUpload($title),
+                // The tus signature expires with the authorization behind it.
+                fn(int $expiresIn): array => $plugin->getBunny()->createDirectUpload($title, ['expiresIn' => $expiresIn]),
             );
         } catch (ForbiddenHttpException | BadRequestHttpException | \RuntimeException | \InvalidArgumentException $e) {
             return $this->asFailure($e->getMessage());

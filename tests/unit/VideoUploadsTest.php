@@ -174,8 +174,11 @@ class VideoUploadsTest extends TestCase
     {
         $this->start();
         $calls = 0;
-        $create = static function() use (&$calls): array {
+        $create = static function(int $expiresIn) use (&$calls): array {
             $calls++;
+            // Provider credentials never outlive the upload context (6h).
+            self::assertGreaterThan(21000, $expiresIn);
+            self::assertLessThanOrEqual(21600, $expiresIn);
 
             return ['uploadId' => 'remote-1', 'url' => 'https://upload.example.test/1'];
         };
