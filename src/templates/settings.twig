@@ -242,7 +242,7 @@
 
     {{ forms.lightswitchField({
         label: 'Automatically host uploaded MP4 videos'|t('polymedia'),
-        instructions: 'Send new MP4 uploads from Craft’s standard uploader to the selected provider, and store a `.pmedia` reference instead of the file. Other files and replacements of existing files upload normally. Off by default. A selected volume whose filesystem uses a custom uploader has its native upload controls disabled until it’s removed from routing.'|t('polymedia'),
+        instructions: 'Send new MP4 uploads from Craft’s standard uploader to the selected provider, and store a `.pmedia` reference instead of the file. Other files and replacements of existing files upload normally. Off by default. If a selected volume’s filesystem type uses a custom uploader (Craft Cloud does), native upload controls are disabled for every volume of that filesystem type until the volume is removed from routing.'|t('polymedia'),
         id: 'autoRouteVideoUploads',
         name: 'autoRouteVideoUploads',
         on: settings.autoRouteVideoUploads,

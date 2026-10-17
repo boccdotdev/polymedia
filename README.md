@@ -132,7 +132,7 @@ A separate, **opt-in** setting. Turn on **Automatically host uploaded MP4 videos
 
 In those volumes, an MP4 uploaded with Craft's normal **Upload files** button or by drag and drop goes straight to the selected provider, and a `.pmedia` lands in the resolved Craft folder. Other files upload normally. Mixed batches keep Craft's ordering, file limits, progress and completion events. Replacing an existing file, and existing MP4 assets, are left alone.
 
-- Routing supports Craft's standard uploader. If a selected volume's filesystem uses a custom JavaScript uploader, Polymedia disables that filesystem type's native upload controls rather than storing raw MP4s; remove its volumes from routing to restore them. **Upload video** keeps working.
+- Routing supports Craft's standard uploader. If a selected volume's filesystem type uses a custom JavaScript uploader, Polymedia disables native upload controls rather than storing raw MP4s. The browser only knows the filesystem type, so this applies to **every volume of that type**, including volumes you didn't select and every Assets field that uploads to them. On Craft Cloud, which has its own uploader, routing one Cloud volume disables native uploads on all of them. Remove the volume from routing to restore them; **Upload video** keeps working either way.
 - Fields must allow the Polymedia file kind and the selected provider. Polymedia fields offer native upload only where routing applies. Upload permissions, owner permissions, source and location restrictions and the field's selection condition still apply.
 - A provider or authorization failure never falls back to storing the MP4 natively.
 - Cancelling stops the browser transfer; a video the provider already created stays in its library.
