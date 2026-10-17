@@ -11,18 +11,24 @@
 
 namespace boccdotdev\polymedia\services;
 
+use boccdotdev\polymedia\base\PlayerEngineInterface;
+use boccdotdev\polymedia\engines\MediaChrome;
 use boccdotdev\polymedia\models\PlayerSettings;
+use boccdotdev\polymedia\models\RenderContext;
 use boccdotdev\polymedia\Plugin;
+use boccdotdev\polymedia\records\MediaItemRecord;
 use Craft;
 use craft\elements\Asset;
-use craft\helpers\App;
-use craft\helpers\Html;
+use craft\errors\SiteNotFoundException;
 use craft\helpers\Json;
 use Twig\Markup;
 use yii\base\Component;
 
 /**
- * Renders Media Chrome player markup from polymedia assets.
+ * Renders player markup and script tags for polymedia assets.
+ *
+ * Resolves each item once into a {@see RenderContext} and hands markup to the
+ * active {@see PlayerEngineInterface}.
  *
  * @author boccdotdev
  * @since 1.0.0
@@ -37,108 +43,41 @@ class Renderer extends Component
      */
     private const AUDIO_TYPES = ['audio', 'spotify'];
 
+    // Private Properties
+    // =========================================================================
+
     /**
-     * @var array<string, string>
+     * @var ?PlayerEngineInterface
      */
-    private const SCRIPT_MAP = [
-        'hls' => 'hls-video-element@1',
-        'dash' => 'dash-video-element@0',
-        'shaka' => 'shaka-video-element@0',
-        'mux' => '@mux/mux-video@0',
-        'youtube' => 'youtube-video-element@1',
-        'vimeo' => 'vimeo-video-element@1',
-        'spotify' => 'spotify-audio-element@1',
-        'tiktok' => 'tiktok-video-element@0',
-        'wistia' => 'wistia-video-element@1',
-        'jwplayer' => 'jwplayer-video-element@0',
-        'twitch' => 'twitch-video-element@0',
-        'cloudflare' => 'cloudflare-video-element@0',
-        'peertube' => 'peertube-video-element@1',
-        'videojs' => 'videojs-video-element@0',
-    ];
+    private ?PlayerEngineInterface $_engine = null;
 
     // Public Methods
     // =========================================================================
 
     /**
-     * Renders a full `<media-controller>` player for a polymedia asset.
+     * Renders a full player for a polymedia asset.
      *
      * @param Asset $asset the `.pmedia` asset
      * @param array $options rendering options (overrides for player settings, poster, children, etc.)
      * @return Markup the rendered HTML
+     * @throws SiteNotFoundException if tracks need the current site and there is none
      *
      * @author boccdotdev
      * @since 1.0.0
      */
     public function player(Asset $asset, array $options = []): Markup
     {
-        $manifest = $this->data($asset);
+        $context = $this->_context($asset, $options, true);
 
-        if (empty($manifest)) {
+        if ($context === null) {
             return new Markup('', 'UTF-8');
         }
 
-        $record = Plugin::getInstance()->getMediaItems()->getByAssetId($asset->id);
-        $type = $manifest['type'] ?? '';
-        $isAudio = in_array($type, self::AUDIO_TYPES, true);
-        $elementMap = Plugin::getInstance()->getUrlDetector()->getElementMap();
-        $elementTag = ($record ? $record->element : null) ?? $elementMap[$type] ?? 'video';
-
-        $defaults = $this->_resolveDefaults($record);
-        $settings = $this->_mergeOptions($defaults, $options);
-        $poster = $this->_resolvePoster($asset, $manifest, $options);
-
-        $controllerAttrs = [];
-
-        if ($isAudio) {
-            $controllerAttrs['audio'] = true;
-        }
-
-        if (isset($options['class'])) {
-            $controllerAttrs['class'] = $options['class'];
-        }
-
-        if (isset($options['id'])) {
-            $controllerAttrs['id'] = $options['id'];
-        }
-
-        foreach ($options['attrs'] ?? [] as $k => $v) {
-            $controllerAttrs[$k] = $v;
-        }
-
-        // Native controls fight Media Chrome's controller UI — omit on player().
-        $mediaAttrs = $this->_buildMediaAttrs($manifest, $settings, $poster, $elementTag, false, $options);
-        $trackHtml = $this->_buildTracksHtml($asset, $options);
-
-        $mediaHtml = Html::beginTag($elementTag, $mediaAttrs)
-            . $trackHtml
-            . Html::endTag($elementTag);
-
-        if ($isAudio && $poster !== null) {
-            $mediaHtml .= Html::tag('img', '', [
-                'slot' => 'poster',
-                'src' => $poster,
-                'alt' => $manifest['title'] ?? '',
-                'class' => 'polymedia-cover',
-            ]);
-        }
-
-        $children = $options['children'] ?? '';
-
-        if ($children === '' && $isAudio) {
-            $children = $this->_defaultAudioControls();
-        }
-
-        $html = Html::beginTag('media-controller', $controllerAttrs)
-            . $mediaHtml
-            . $children
-            . Html::endTag('media-controller');
-
-        return new Markup($html, 'UTF-8');
+        return new Markup($this->getEngine()->player($context), 'UTF-8');
     }
 
     /**
-     * Renders just the media element (without `<media-controller>` wrapper).
+     * Renders just the media element, without the player wrapper.
      *
      * @param Asset $asset the `.pmedia` asset
      * @param array $options rendering options
@@ -149,28 +88,13 @@ class Renderer extends Component
      */
     public function element(Asset $asset, array $options = []): Markup
     {
-        $manifest = $this->data($asset);
+        $context = $this->_context($asset, $options, false);
 
-        if (empty($manifest)) {
+        if ($context === null) {
             return new Markup('', 'UTF-8');
         }
 
-        $record = Plugin::getInstance()->getMediaItems()->getByAssetId($asset->id);
-        $type = $manifest['type'] ?? '';
-        $elementMap = Plugin::getInstance()->getUrlDetector()->getElementMap();
-        $elementTag = ($record ? $record->element : null) ?? $elementMap[$type] ?? 'video';
-
-        $defaults = $this->_resolveDefaults($record);
-        $settings = $this->_mergeOptions($defaults, $options);
-        $poster = $this->_resolvePoster($asset, $manifest, $options);
-
-        // element() has no media-controller; emit native controls when requested.
-        $mediaAttrs = $this->_buildMediaAttrs($manifest, $settings, $poster, $elementTag, true, $options);
-        unset($mediaAttrs['slot']);
-
-        $html = Html::beginTag($elementTag, $mediaAttrs) . Html::endTag($elementTag);
-
-        return new Markup($html, 'UTF-8');
+        return new Markup($this->getEngine()->element($context), 'UTF-8');
     }
 
     /**
@@ -210,12 +134,7 @@ class Renderer extends Component
      */
     public function aspectRatio(Asset $asset): ?string
     {
-        $manifest = $this->data($asset);
-
-        return self::cssAspectRatio($manifest['metadata']['aspectRatio'] ?? null)
-            ?? (isset($manifest['width'], $manifest['height'])
-                ? self::cssAspectRatio("{$manifest['width']}:{$manifest['height']}")
-                : null);
+        return $this->_aspectRatio($this->data($asset));
     }
 
     /**
@@ -257,7 +176,7 @@ class Renderer extends Component
     }
 
     /**
-     * Renders `<script type="module">` tags for Media Chrome and provider elements.
+     * Renders `<script type="module">` tags for the player and provider elements.
      *
      * @param array $opts options: `providers`, `version`, `mode`
      * @return Markup the script tags
@@ -275,50 +194,8 @@ class Renderer extends Component
         }
 
         $providers = $opts['providers'] ?? $settings->defaultProviders;
-        $version = $opts['version'] ?? $settings->mediaChromeVersion;
 
-        $tags = [];
-
-        if ($mode === 'cdn') {
-            $cdnHost = App::parseEnv($settings->cdnHost) ?: $settings->cdnHost;
-            $tags[] = Html::tag('script', '', [
-                'type' => 'module',
-                'src' => "https://{$cdnHost}/npm/media-chrome@{$version}/+esm",
-            ]);
-
-            foreach ($providers as $provider) {
-                $pkg = self::SCRIPT_MAP[$provider] ?? null;
-
-                if ($pkg) {
-                    $tags[] = Html::tag('script', '', [
-                        'type' => 'module',
-                        'src' => "https://{$cdnHost}/npm/{$pkg}/+esm",
-                    ]);
-                }
-            }
-        } elseif ($mode === 'self-host') {
-            $selfHostBase = App::parseEnv($settings->selfHostBaseUrl ?? '') ?: ($settings->selfHostBaseUrl ?? '');
-            $base = rtrim((string)$selfHostBase, '/');
-            $tags[] = Html::tag('script', '', [
-                'type' => 'module',
-                'src' => "{$base}/media-chrome.min.js",
-            ]);
-
-            foreach ($providers as $provider) {
-                $pkg = self::SCRIPT_MAP[$provider] ?? null;
-
-                if ($pkg) {
-                    $name = str_contains($pkg, '/') ? explode('/', $pkg)[1] : $pkg;
-                    $name = preg_replace('/@\d+$/', '', $name);
-                    $tags[] = Html::tag('script', '', [
-                        'type' => 'module',
-                        'src' => "{$base}/{$name}.min.js",
-                    ]);
-                }
-            }
-        }
-
-        return new Markup(implode("\n", $tags), 'UTF-8');
+        return new Markup($this->getEngine()->scripts($providers, $mode, $opts), 'UTF-8');
     }
 
     /**
@@ -332,9 +209,9 @@ class Renderer extends Component
      */
     public function poster(Asset $asset): ?string
     {
-        $manifest = $this->data($asset);
+        $record = Plugin::getInstance()->getMediaItems()->getByAssetId($asset->id);
 
-        return $this->_resolvePoster($asset, $manifest, []);
+        return $this->_resolvePoster($record, $this->data($asset), []);
     }
 
     /**
@@ -383,8 +260,70 @@ class Renderer extends Component
         return Plugin::getInstance()->getRelatedAssets()->getTranscript($record->id);
     }
 
+    /**
+     * Returns the player engine that renders markup and script tags.
+     *
+     * @return PlayerEngineInterface
+     *
+     * @author boccdotdev
+     * @since 2.4.0
+     */
+    public function getEngine(): PlayerEngineInterface
+    {
+        return $this->_engine ??= new MediaChrome();
+    }
+
     // Private Methods
     // =========================================================================
+
+    /**
+     * Resolves everything an engine needs to render an item.
+     *
+     * @param Asset $asset the `.pmedia` asset
+     * @param array $options rendering options
+     * @param bool $withTracks whether to resolve `<track>` children
+     * @return ?RenderContext null when the asset has no manifest
+     * @throws SiteNotFoundException if tracks need the current site and there is none
+     */
+    private function _context(Asset $asset, array $options, bool $withTracks): ?RenderContext
+    {
+        $manifest = $this->data($asset);
+
+        if (empty($manifest)) {
+            return null;
+        }
+
+        $record = Plugin::getInstance()->getMediaItems()->getByAssetId($asset->id);
+        $type = $manifest['type'] ?? '';
+        $elementMap = Plugin::getInstance()->getUrlDetector()->getElementMap();
+
+        return new RenderContext([
+            'manifest' => $manifest,
+            'type' => $type,
+            'elementTag' => ($record ? $record->element : null) ?? $elementMap[$type] ?? 'video',
+            'isAudio' => in_array($type, self::AUDIO_TYPES, true),
+            'settings' => $this->_mergeOptions($this->_resolveDefaults($record), $options),
+            'poster' => $this->_resolvePoster($record, $manifest, $options),
+            'tracks' => $withTracks ? $this->_resolveTracks($record, $options) : [],
+            'aspectRatio' => $this->_aspectRatio($manifest),
+            'options' => $options,
+        ]);
+    }
+
+    /**
+     * Returns the CSS aspect ratio from a manifest: the stored ratio, then
+     * the stored video dimensions.
+     *
+     * @param array $manifest the manifest data
+     * @return ?string
+     */
+    private function _aspectRatio(array $manifest): ?string
+    {
+        return self::cssAspectRatio($manifest['metadata']['aspectRatio'] ?? null)
+            ?? (isset($manifest['width'], $manifest['height'])
+                ? self::cssAspectRatio("{$manifest['width']}:{$manifest['height']}")
+                : null);
+    }
 
     /**
      * @param mixed $record the media item record
@@ -436,12 +375,12 @@ class Renderer extends Component
     /**
      * Resolves poster URL through the priority chain.
      *
-     * @param Asset $asset the polymedia asset
+     * @param ?MediaItemRecord $record the media item record
      * @param array $manifest the manifest data
      * @param array $options rendering options
      * @return ?string the poster URL, or null
      */
-    private function _resolvePoster(Asset $asset, array $manifest, array $options): ?string
+    private function _resolvePoster(?MediaItemRecord $record, array $manifest, array $options): ?string
     {
         if (isset($options['poster'])) {
             if ($options['poster'] === false) {
@@ -450,8 +389,6 @@ class Renderer extends Component
 
             return (string)$options['poster'];
         }
-
-        $record = Plugin::getInstance()->getMediaItems()->getByAssetId($asset->id);
 
         if ($record) {
             $posterAsset = Plugin::getInstance()->getRelatedAssets()->getPoster($record->id);
@@ -465,101 +402,23 @@ class Renderer extends Component
     }
 
     /**
-     * Builds the HTML attributes for the media element.
+     * Resolves `<track>` attributes for captions, subtitles and descriptions.
      *
-     * @param array $manifest the manifest data
-     * @param PlayerSettings $settings the resolved settings
-     * @param ?string $poster the resolved poster URL
-     * @param string $elementTag the element tag name
-     * @param bool $emitControls whether to emit the native `controls` attribute
-     *        (true for bare `element()`; false inside `player()` where Media
-     *        Chrome supplies the control UI)
-     * @return array
+     * @param ?MediaItemRecord $record the media item record
+     * @param array $options rendering options (`tracks`: `auto`, `all`, `none`/false)
+     * @return array<int, array<string, string>>
+     * @throws SiteNotFoundException if there is no current site
      */
-    private function _buildMediaAttrs(
-        array $manifest,
-        PlayerSettings $settings,
-        ?string $poster,
-        string $elementTag,
-        bool $emitControls = false,
-        array $options = [],
-    ): array {
-        $type = $manifest['type'] ?? '';
-        $attrs = ['slot' => 'media'];
-
-        if ($elementTag === 'mux-video') {
-            $attrs['playback-id'] = $manifest['providerId'] ?? '';
-
-            if (!isset($manifest['streamType'])) {
-                $attrs['stream-type'] = 'on-demand';
-            }
-        } else {
-            $attrs['src'] = $manifest['url'] ?? '';
-        }
-
-        if ($settings->autoplay) {
-            $attrs['autoplay'] = true;
-        }
-
-        if ($settings->loop) {
-            $attrs['loop'] = true;
-        }
-
-        if ($settings->muted) {
-            $attrs['muted'] = true;
-        }
-
-        if ($emitControls && $settings->controls) {
-            $attrs['controls'] = true;
-        }
-
-        if ($settings->playsinline) {
-            $attrs['playsinline'] = true;
-        }
-
-        if ($settings->preload !== 'metadata') {
-            $attrs['preload'] = $settings->preload;
-        }
-
-        if ($settings->crossorigin) {
-            $attrs['crossorigin'] = $settings->crossorigin;
-        }
-
-        if ($poster !== null && !in_array($type, self::AUDIO_TYPES, true)) {
-            $attrs['poster'] = $poster;
-        }
-
-        // Template-supplied attrs on the media element (not the controller).
-        foreach ($options['mediaAttrs'] ?? [] as $k => $v) {
-            $attrs[$k] = $v;
-        }
-
-        return $attrs;
-    }
-
-    /**
-     * Builds `<track>` elements for the media element.
-     *
-     * @param Asset $asset the polymedia asset
-     * @param array $options rendering options
-     * @return string
-     */
-    private function _buildTracksHtml(Asset $asset, array $options): string
+    private function _resolveTracks(?MediaItemRecord $record, array $options): array
     {
         $tracksMode = $options['tracks'] ?? 'auto';
 
-        if ($tracksMode === 'none' || $tracksMode === false) {
-            return '';
-        }
-
-        $record = Plugin::getInstance()->getMediaItems()->getByAssetId($asset->id);
-
-        if (!$record) {
-            return '';
+        if ($tracksMode === 'none' || $tracksMode === false || !$record) {
+            return [];
         }
 
         $siteId = $tracksMode === 'all' ? null : Craft::$app->getSites()->getCurrentSite()->id;
-        $html = '';
+        $tracks = [];
 
         foreach (['captions', 'subtitles', 'descriptions'] as $role) {
             $relatedRecords = Plugin::getInstance()->getRelatedAssets()->getTrackRecords((int)$record->id, $role, $siteId);
@@ -572,7 +431,7 @@ class Renderer extends Component
                 }
 
                 $trackAttrs = [
-                    'kind' => $role === 'descriptions' ? 'descriptions' : $role,
+                    'kind' => $role,
                     'src' => $trackAsset->getUrl(),
                 ];
 
@@ -584,30 +443,10 @@ class Renderer extends Component
                     $trackAttrs['label'] = $related->label;
                 }
 
-                $html .= Html::tag('track', '', $trackAttrs);
+                $tracks[] = $trackAttrs;
             }
         }
 
-        return $html;
-    }
-
-    /**
-     * Returns default `<media-control-bar>` markup for audio players.
-     *
-     * Media Chrome does not provide default controls in audio mode,
-     * so we inject a sensible default set when no children are supplied.
-     *
-     * @return string
-     */
-    private function _defaultAudioControls(): string
-    {
-        return Html::beginTag('media-control-bar')
-            . Html::tag('media-play-button', '')
-            . Html::tag('media-time-display', '', ['showduration' => true])
-            . Html::tag('media-time-range', '')
-            . Html::tag('media-playback-rate-button', '')
-            . Html::tag('media-mute-button', '')
-            . Html::tag('media-volume-range', '')
-            . Html::endTag('media-control-bar');
+        return $tracks;
     }
 }
