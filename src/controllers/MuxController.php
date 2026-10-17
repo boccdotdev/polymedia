@@ -12,6 +12,7 @@
 namespace boccdotdev\polymedia\controllers;
 
 use boccdotdev\polymedia\models\DetectionResult;
+use boccdotdev\polymedia\models\Settings;
 use boccdotdev\polymedia\Plugin;
 use Craft;
 use craft\elements\Asset;
@@ -507,8 +508,9 @@ class MuxController extends Controller
     }
 
     /**
-     * Returns a failure response when the request is not Pro + Mux-configured,
-     * or null when the caller may proceed.
+     * Returns a failure response unless the request is Pro, Mux is configured
+     * and Mux is the selected hosting provider, or null when the caller may
+     * proceed.
      *
      * @return ?Response
      */
@@ -541,6 +543,13 @@ class MuxController extends Controller
                     'settingsUrl' => $settingsUrl,
                     'code' => 'not_configured',
                 ],
+            );
+        }
+
+        if (!$plugin->isVideoProviderEnabled(Settings::PROVIDER_MUX)) {
+            return $this->asFailure(
+                Craft::t('polymedia', 'Mux is not the selected video hosting provider for new imports and uploads.'),
+                data: ['code' => 'inactive_provider'],
             );
         }
 

@@ -11,6 +11,7 @@
 
 namespace boccdotdev\polymedia\models;
 
+use boccdotdev\polymedia\services\Bunny;
 use craft\base\Model;
 use craft\helpers\App;
 
@@ -50,6 +51,30 @@ class Settings extends Model
      * @since 2.4.0
      */
     public const VIDEOJS_SKINS = ['default', 'neutral', 'compat'];
+
+    /**
+     * @var string Mux video hosting provider.
+     * @since 2.5.0
+     */
+    public const PROVIDER_MUX = 'mux';
+
+    /**
+     * @var string Bunny Stream video hosting provider.
+     * @since 2.5.0
+     */
+    public const PROVIDER_BUNNY = 'bunny';
+
+    /**
+     * @var string[] Every video hosting provider handle.
+     * @since 2.5.0
+     */
+    public const VIDEO_PROVIDERS = [self::PROVIDER_MUX, self::PROVIDER_BUNNY];
+
+    /**
+     * @var string Pattern for a whole-value environment variable reference.
+     * @since 2.5.0
+     */
+    public const ENV_REFERENCE_PATTERN = '/^\$[A-Za-z_][A-Za-z0-9_]*$/D';
 
     // Public Properties
     // =========================================================================
@@ -187,6 +212,33 @@ class Settings extends Model
      */
     public ?string $muxWebhookSecret = null;
 
+    /**
+     * @var string Hosting provider for new library imports and uploads, `mux`
+     * or `bunny`. Existing assets keep their own provider when this changes.
+     * @since 2.5.0
+     */
+    public string $videoProvider = self::PROVIDER_MUX;
+
+    /**
+     * @var ?string Bunny Stream library ID. Supports env syntax (`$BUNNY_LIBRARY_ID`).
+     * @since 2.5.0
+     */
+    public ?string $bunnyLibraryId = null;
+
+    /**
+     * @var ?string Environment reference for the Bunny Stream library's write
+     * API key (`$BUNNY_API_KEY`). Literal keys are rejected.
+     * @since 2.5.0
+     */
+    public ?string $bunnyApiKey = null;
+
+    /**
+     * @var ?string Native Bunny delivery hostname such as `vz-example.b-cdn.net`,
+     * without a scheme or path. Supports env syntax (`$BUNNY_CDN_HOSTNAME`).
+     * @since 2.5.0
+     */
+    public ?string $bunnyCdnHostname = null;
+
     // Public Methods
     // =========================================================================
 
@@ -235,6 +287,35 @@ class Settings extends Model
     }
 
     /**
+     * Validates a literal (or resolved) Bunny library ID or delivery hostname.
+     *
+     * Environment references that are unset here pass, because another
+     * environment may define them.
+     *
+     * @param string $attribute `bunnyLibraryId` or `bunnyCdnHostname`
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function validateBunnyConnection(string $attribute): void
+    {
+        $value = App::parseEnv((string)$this->$attribute);
+
+        if ($value === null || $value === '' || is_bool($value)) {
+            return;
+        }
+
+        try {
+            match ($attribute) {
+                'bunnyLibraryId' => Bunny::validateLibraryId(trim($value)),
+                default => Bunny::validateHostname(strtolower(trim($value))),
+            };
+        } catch (\InvalidArgumentException $e) {
+            $this->addError($attribute, $e->getMessage());
+        }
+    }
+
+    /**
      * @inheritdoc
      */
     protected function defineRules(): array
@@ -258,6 +339,16 @@ class Settings extends Model
             'skipOnEmpty' => true,
             'message' => 'Use an environment variable reference such as `$MUX_TOKEN_ID`. Literal credentials cannot be saved to project config.',
         ];
+        $rules[] = [['bunnyLibraryId', 'bunnyApiKey', 'bunnyCdnHostname'], 'string'];
+        $rules[] = [
+            ['bunnyApiKey'],
+            'match',
+            'pattern' => self::ENV_REFERENCE_PATTERN,
+            'skipOnEmpty' => true,
+            'message' => 'Use an environment variable reference such as `$BUNNY_API_KEY`. Literal credentials cannot be saved to project config.',
+        ];
+        $rules[] = [['bunnyLibraryId', 'bunnyCdnHostname'], 'validateBunnyConnection'];
+        $rules[] = [['videoProvider'], 'in', 'range' => self::VIDEO_PROVIDERS];
         $rules[] = [['selfHostBaseUrl'], 'string'];
         $rules[] = [['defaultVolumeUid', 'attachmentsVolumeUid', 'sidecarVolumeUid'], 'string', 'max' => 36];
         $rules[] = [

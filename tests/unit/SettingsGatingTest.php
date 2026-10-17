@@ -39,6 +39,55 @@ class SettingsGatingTest extends TestCase
         $this->assertTrue($settings->autoFetchPoster);
     }
 
+    public function testVideoHostingDefaultsKeepExistingSitesOnMux(): void
+    {
+        $settings = new Settings();
+
+        $this->assertSame(Settings::PROVIDER_MUX, $settings->videoProvider);
+        $this->assertNull($settings->bunnyLibraryId);
+        $this->assertNull($settings->bunnyApiKey);
+        $this->assertNull($settings->bunnyCdnHostname);
+    }
+
+    public function testBunnySettingsValidation(): void
+    {
+        if (\Yii::$app === null) {
+            new \yii\console\Application([
+                'id' => 'polymedia-tests',
+                'basePath' => dirname(__DIR__, 2),
+            ]);
+        }
+
+        $attributes = ['videoProvider', 'bunnyLibraryId', 'bunnyApiKey', 'bunnyCdnHostname'];
+        $invalid = new Settings([
+            'videoProvider' => 'vimeo',
+            'bunnyLibraryId' => '12a',
+            'bunnyApiKey' => 'literal-key',
+            'bunnyCdnHostname' => 'https://vz-example.b-cdn.net/',
+        ]);
+
+        $this->assertFalse($invalid->validate($attributes));
+
+        foreach ($attributes as $attribute) {
+            $this->assertTrue($invalid->hasErrors($attribute), $attribute);
+        }
+
+        $literal = new Settings([
+            'videoProvider' => Settings::PROVIDER_BUNNY,
+            'bunnyLibraryId' => '133',
+            'bunnyApiKey' => '$BUNNY_API_KEY',
+            'bunnyCdnHostname' => 'vz-example.b-cdn.net',
+        ]);
+        $this->assertTrue($literal->validate($attributes));
+
+        // Unset references pass: another environment may define them.
+        $references = new Settings([
+            'bunnyLibraryId' => '$POLYMEDIA_TEST_UNSET_LIBRARY',
+            'bunnyCdnHostname' => '$POLYMEDIA_TEST_UNSET_HOST',
+        ]);
+        $this->assertTrue($references->validate($attributes));
+    }
+
     public function testMuxCredentialsMustUseEnvironmentReferences(): void
     {
         if (!class_exists(\Yii::class, false)) {

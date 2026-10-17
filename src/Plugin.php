@@ -24,6 +24,7 @@ use boccdotdev\polymedia\models\PlayerSettings;
 use boccdotdev\polymedia\models\Settings;
 use boccdotdev\polymedia\records\MediaItemRecord;
 use boccdotdev\polymedia\services\AssetFieldSettings;
+use boccdotdev\polymedia\services\Bunny;
 use boccdotdev\polymedia\services\EditorContent;
 use boccdotdev\polymedia\services\ManifestWriter;
 use boccdotdev\polymedia\services\MediaItems;
@@ -89,6 +90,7 @@ use yii\base\Event;
  * @property-read ProviderFilter $providerFilter
  * @property-read EditorContent $editorContent
  * @property-read Mux $mux
+ * @property-read Bunny $bunny
  * @property-read PosterFetcher $posterFetcher
  * @property-read SidecarStorage $sidecarStorage
  *
@@ -106,7 +108,7 @@ class Plugin extends BasePlugin
     public const EDITION_LITE = 'lite';
 
     /**
-     * Commercial edition: Lite + Mux credentials, library browse, direct upload.
+     * Commercial edition: Lite + hosted video libraries (Mux, Bunny Stream) and direct uploads.
      */
     public const EDITION_PRO = 'pro';
 
@@ -166,6 +168,7 @@ class Plugin extends BasePlugin
             'providerFilter' => ProviderFilter::class,
             'editorContent' => EditorContent::class,
             'mux' => Mux::class,
+            'bunny' => Bunny::class,
             'posterFetcher' => PosterFetcher::class,
             'sidecarStorage' => SidecarStorage::class,
         ]);
@@ -214,6 +217,61 @@ class Plugin extends BasePlugin
     public function getMuxEnabled(): bool
     {
         return $this->getIsPro() && $this->getMux()->isConfigured();
+    }
+
+    /**
+     * Returns whether Bunny Stream API calls may run: Pro edition with a
+     * configured library.
+     *
+     * Not tied to the selected provider, so older Bunny assets can still be
+     * synchronized after switching to Mux.
+     *
+     * @return bool
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function getBunnyEnabled(): bool
+    {
+        return $this->getIsPro() && $this->getBunny()->isConfigured();
+    }
+
+    /**
+     * Returns whether a provider may accept new library imports and uploads.
+     *
+     * Only the selected provider does, and only with Pro and its credentials.
+     * Playback and synchronization of existing assets don't use this gate.
+     *
+     * @param string $provider `mux` or `bunny`
+     * @return bool
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function isVideoProviderEnabled(string $provider): bool
+    {
+        if ($provider !== $this->getSettings()->videoProvider) {
+            return false;
+        }
+
+        return match ($provider) {
+            Settings::PROVIDER_MUX => $this->getMuxEnabled(),
+            Settings::PROVIDER_BUNNY => $this->getBunnyEnabled(),
+            default => false,
+        };
+    }
+
+    /**
+     * Returns whether the selected provider accepts new imports and uploads.
+     *
+     * @return bool
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function getVideoEnabled(): bool
+    {
+        return $this->isVideoProviderEnabled($this->getSettings()->videoProvider);
     }
 
     /**
@@ -347,6 +405,19 @@ class Plugin extends BasePlugin
     }
 
     /**
+     * Returns the Bunny Stream service.
+     *
+     * @return Bunny
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function getBunny(): Bunny
+    {
+        return $this->get('bunny');
+    }
+
+    /**
      * Returns the poster fetcher service.
      *
      * @return PosterFetcher
@@ -414,6 +485,7 @@ class Plugin extends BasePlugin
             'volumeOptions' => $volumeOptions,
             'isPro' => $this->getIsPro(),
             'muxConfigured' => $this->getMux()->isConfigured(),
+            'bunnyConfigured' => $this->getBunny()->isConfigured(),
             // Site action URL (actionUrl() would prepend the CP trigger here).
             'muxWebhookUrl' => UrlHelper::siteUrl(
                 Craft::$app->getConfig()->getGeneral()->actionTrigger . '/polymedia/webhooks/mux',
@@ -1148,7 +1220,7 @@ class Plugin extends BasePlugin
                 ]);
                 $view->registerJs(
                     'window.CraftPolymediaConfig = ' . Json::encode([
-                        'muxEnabled' => $this->getMuxEnabled(),
+                        'muxEnabled' => $this->isVideoProviderEnabled(Settings::PROVIDER_MUX),
                         'isPro' => $this->getIsPro(),
                     ]) . ';',
                     View::POS_HEAD,
