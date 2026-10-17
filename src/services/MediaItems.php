@@ -597,6 +597,142 @@ class MediaItems extends Component
     }
 
     /**
+     * Applies current Bunny Stream video state to an imported media item.
+     *
+     * The one idempotent, lock-guarded transition shared by library import,
+     * upload completion, console sync and webhooks. Stores status, playback
+     * policy, MP4 renditions and thumbnail metadata, updates the duration and
+     * video dimensions, keeps the manifest file in step, and queues a poster
+     * once a public thumbnail exists. Unchanged state writes nothing.
+     *
+     * @param MediaItemRecord $record the bunny-type media item
+     * @param array $state mapped video state ({@see Bunny::getAsset()})
+     * @param ?int $expectedVersion the `bunnySyncVersion` read before the state
+     *                              was fetched; a newer stored version means a
+     *                              concurrent sync won, so this stale state is
+     *                              rejected
+     * @return ?MediaItemRecord the updated record, or `null` when it no longer exists
+     * @throws \RuntimeException when the item is busy, a newer sync won, the
+     *                           state targets another video, or saving fails
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function applyBunnyVideoState(MediaItemRecord $record, array $state, ?int $expectedVersion = null): ?MediaItemRecord
+    {
+        $applied = $this->withItemLock($record, function() use ($record, $state, $expectedVersion): bool {
+            $fresh = $this->getById((int)$record->id);
+
+            if (!$fresh) {
+                return false;
+            }
+
+            $metadata = self::decodeMetadataJson($fresh->metadata);
+            $version = (int)($metadata['bunnySyncVersion'] ?? 0);
+
+            if ($expectedVersion !== null && $version !== $expectedVersion) {
+                throw new \RuntimeException('Another Bunny synchronization completed first. Retry to fetch the current state.');
+            }
+
+            $merge = self::mergeBunnyVideoState($metadata, $fresh->duration !== null ? (int)$fresh->duration : null, $state);
+            $dimensions = self::mergeMuxDimensions(
+                $fresh->width !== null ? (int)$fresh->width : null,
+                $fresh->height !== null ? (int)$fresh->height : null,
+                $state,
+            );
+
+            if ($merge['changed'] || $dimensions['changed']) {
+                $merge['metadata']['bunnySyncVersion'] = $version + 1;
+                $fresh->metadata = Json::encode($merge['metadata']);
+                $fresh->duration = $merge['duration'];
+                $fresh->width = $dimensions['width'];
+                $fresh->height = $dimensions['height'];
+
+                if (!$this->save($fresh)) {
+                    throw new \RuntimeException("Could not persist Bunny state for media item #{$record->id}.");
+                }
+
+                // The manifest file is written under the same lock as the row.
+                $asset = Craft::$app->getAssets()->getAssetById((int)$fresh->assetId);
+
+                if ($asset) {
+                    Plugin::getInstance()->getManifestWriter()->update($asset, ['metadata' => $merge['metadata']]);
+                }
+            }
+
+            $record->metadata = $fresh->metadata;
+            $record->duration = $fresh->duration;
+            $record->width = $fresh->width;
+            $record->height = $fresh->height;
+
+            return true;
+        });
+
+        if ($applied === null) {
+            throw new \RuntimeException('Bunny media item is busy. Retry synchronization.');
+        }
+
+        if (!$applied) {
+            return null;
+        }
+
+        // Outside the lock: the poster job re-checks under its own lock.
+        if (!empty($state['thumbnailUrl']) && ($state['playbackPolicy'] ?? null) === 'public') {
+            Plugin::getInstance()->getPosterFetcher()->ensureBunnyPoster($record);
+        }
+
+        return $record;
+    }
+
+    /**
+     * Pure merge of incoming Bunny state into metadata + duration.
+     *
+     * Provider state never changes an item's identity (library, video, host),
+     * its title or an editor's poster URL.
+     *
+     * @param array<string, mixed> $metadata current metadata
+     * @param ?int $duration current duration in seconds
+     * @param array $state incoming state ({@see Bunny::getAsset()})
+     * @return array{metadata: array<string, mixed>, duration: ?int, changed: bool}
+     * @throws \RuntimeException when the state belongs to another video or host
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public static function mergeBunnyVideoState(array $metadata, ?int $duration, array $state): array
+    {
+        foreach (['bunnyLibraryId', 'bunnyVideoId', 'bunnyCdnHostname'] as $key) {
+            if (!isset($metadata[$key], $state[$key]) || (string)$metadata[$key] !== (string)$state[$key]) {
+                throw new \RuntimeException('Bunny synchronization cannot retarget an imported video.');
+            }
+        }
+
+        $merged = $metadata;
+        $merged['bunnyStatus'] = $state['bunnyStatus'] ?? null;
+        $merged['bunnyPlaybackPolicy'] = $state['playbackPolicy'] ?? null;
+        $merged['bunnyThumbnailUrl'] = $state['thumbnailUrl'] ?? null;
+
+        // Absent means "not checked", which keeps the last known renditions.
+        if (array_key_exists('mp4Renditions', $state) && is_array($state['mp4Renditions'])) {
+            $merged['mp4Renditions'] = $state['mp4Renditions'];
+        }
+
+        // A late thumbnail is kept as the remote poster, never over an editor's.
+        if (empty($merged['thumbnail']) && !empty($state['thumbnailUrl'])) {
+            $merged['thumbnail'] = $state['thumbnailUrl'];
+        }
+
+        $incoming = isset($state['duration']) && is_numeric($state['duration']) ? (int)round((float)$state['duration']) : 0;
+        $newDuration = $incoming > 0 ? $incoming : $duration;
+
+        return [
+            'metadata' => $merged,
+            'duration' => $newDuration,
+            'changed' => $merged !== $metadata || $newDuration !== $duration,
+        ];
+    }
+
+    /**
      * Decodes a media item’s JSON `metadata` column to an array.
      *
      * @param MediaItemRecord $record

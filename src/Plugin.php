@@ -25,6 +25,7 @@ use boccdotdev\polymedia\models\Settings;
 use boccdotdev\polymedia\records\MediaItemRecord;
 use boccdotdev\polymedia\services\AssetFieldSettings;
 use boccdotdev\polymedia\services\Bunny;
+use boccdotdev\polymedia\services\BunnySync;
 use boccdotdev\polymedia\services\EditorContent;
 use boccdotdev\polymedia\services\ManifestWriter;
 use boccdotdev\polymedia\services\MediaItems;
@@ -91,6 +92,7 @@ use yii\base\Event;
  * @property-read EditorContent $editorContent
  * @property-read Mux $mux
  * @property-read Bunny $bunny
+ * @property-read BunnySync $bunnySync
  * @property-read PosterFetcher $posterFetcher
  * @property-read SidecarStorage $sidecarStorage
  *
@@ -169,6 +171,7 @@ class Plugin extends BasePlugin
             'editorContent' => EditorContent::class,
             'mux' => Mux::class,
             'bunny' => Bunny::class,
+            'bunnySync' => BunnySync::class,
             'posterFetcher' => PosterFetcher::class,
             'sidecarStorage' => SidecarStorage::class,
         ]);
@@ -415,6 +418,19 @@ class Plugin extends BasePlugin
     public function getBunny(): Bunny
     {
         return $this->get('bunny');
+    }
+
+    /**
+     * Returns the Bunny Stream import and sync service.
+     *
+     * @return BunnySync
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function getBunnySync(): BunnySync
+    {
+        return $this->get('bunnySync');
     }
 
     /**

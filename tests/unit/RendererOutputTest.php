@@ -479,6 +479,38 @@ class RendererOutputTest extends TestCase
         $this->assertStringContainsString('<mux-video slot="media" playback-id="pb1"', (string)(new Renderer())->player($this->_polymediaAsset()));
     }
 
+    public function testBunnyRendersHlsOnBothEnginesAndHidesUnavailableVideos(): void
+    {
+        $url = 'https://vz-example.b-cdn.net/657bb740-a71b-4529-a012-528021c31a92/playlist.m3u8';
+        $manifest = self::_manifest('bunny', $url, '133:657bb740-a71b-4529-a012-528021c31a92', 'hls-video', [
+            'bunnyStatus' => 4,
+            'mp4Renditions' => [['url' => 'https://vz-example.b-cdn.net/657bb740-a71b-4529-a012-528021c31a92/play_720p.mp4', 'status' => 'ready', 'height' => 720]],
+        ]);
+        $this->_given($manifest, ['element' => 'hls-video'], null, []);
+
+        $this->assertStringContainsString('<hls-video src="' . $url . '" slot="media"', (string)(new Renderer())->player($this->_polymediaAsset()));
+        $this->assertStringContainsString('<video src="https://vz-example.b-cdn.net/657bb740-a71b-4529-a012-528021c31a92/play_720p.mp4"', (string)(new Renderer())->element($this->_polymediaAsset(), ['playbackFormat' => 'mp4']));
+
+        $this->_settings->playerEngine = Settings::ENGINE_VIDEOJS;
+        $this->assertStringContainsString('<hlsjs-video src="' . $url . '"', (string)(new Renderer())->player($this->_polymediaAsset()));
+
+        $manifest['metadata']['bunnyStatus'] = -1;
+        $this->_given($manifest, ['element' => 'hls-video'], null, []);
+        $this->assertSame('', (string)(new Renderer())->player($this->_polymediaAsset()));
+        $this->assertSame('', (string)(new Renderer())->element($this->_polymediaAsset()));
+    }
+
+    public function testSharedProviderPackagesLoadOnce(): void
+    {
+        $scripts = (string)(new Renderer())->scripts(['hls', 'bunny']);
+
+        $this->assertSame(1, substr_count($scripts, 'hls-video-element@1'));
+        $this->assertStringNotContainsString('@mux/mux-video', $scripts);
+
+        $this->_settings->playerEngine = Settings::ENGINE_VIDEOJS;
+        $this->assertSame(1, substr_count((string)(new Renderer())->scripts(['hls', 'bunny']), 'media/hlsjs-video.js'));
+    }
+
     public function testScriptsAcceptAProviderList(): void
     {
         $this->assertSame(

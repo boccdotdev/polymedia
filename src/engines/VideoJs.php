@@ -50,6 +50,7 @@ class VideoJs extends PlayerEngine
      */
     public const MEDIA = [
         'hls' => ['hlsjs-video', 'media/hlsjs-video.js'],
+        'bunny' => ['hlsjs-video', 'media/hlsjs-video.js'],
         'dash' => ['dash-video', 'media/dash-video.js'],
         'shaka' => ['shaka-video', 'media/shaka-video.js'],
         'mux' => ['mux-video', 'media/mux-video.js'],

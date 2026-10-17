@@ -8,9 +8,13 @@
 
 namespace boccdotdev\polymedia\tests\unit;
 
+use boccdotdev\polymedia\console\controllers\BunnyController as BunnyConsoleController;
 use boccdotdev\polymedia\models\Settings;
 use boccdotdev\polymedia\Plugin;
+use boccdotdev\polymedia\records\MediaItemRecord;
 use boccdotdev\polymedia\services\Bunny;
+use boccdotdev\polymedia\services\BunnySync;
+use boccdotdev\polymedia\services\MediaItems;
 use Craft;
 use PHPUnit\Framework\TestCase;
 
@@ -105,6 +109,47 @@ class BunnyGatingTest extends TestCase
         self::assertFalse($this->_plugin->getVideoEnabled(), 'Selected but not configured.');
         self::assertFalse($this->_plugin->isVideoProviderEnabled('unknown'));
     }
+
+    public function testConsoleSyncRequiresProAndConfiguration(): void
+    {
+        $controller = $this->getMockBuilder(BunnyConsoleController::class)->disableOriginalConstructor()
+            ->onlyMethods(['stdout', 'stderr'])->getMock();
+        $controller->expects(self::once())->method('stderr')->willReturn(1);
+
+        self::assertSame(\yii\console\ExitCode::CONFIG, $controller->actionSync());
+    }
+
+    public function testConsoleSyncFiltersByVideoAndCountsFailures(): void
+    {
+        $this->_plugin->bunny = true;
+        $records = [];
+
+        foreach (['657bb740-a71b-4529-a012-528021c31a92', '757bb740-a71b-4529-a012-528021c31a92'] as $i => $videoId) {
+            $record = $this->createMock(MediaItemRecord::class);
+            $record->method('__get')->willReturnCallback(fn(string $name) => match ($name) {
+                'metadata' => json_encode(['bunnyVideoId' => $videoId]),
+                'title' => "Video {$i}",
+                default => $i,
+            });
+            $records[] = $record;
+        }
+
+        $items = $this->getMockBuilder(MediaItems::class)->onlyMethods(['getByType'])->getMock();
+        $items->method('getByType')->with('bunny')->willReturn($records);
+        $sync = $this->createMock(BunnySync::class);
+        $sync->expects(self::once())->method('syncRecord')->with($records[1])
+            ->willThrowException(new \RuntimeException('Bunny is down'));
+        $this->_plugin->items = $items;
+        $this->_plugin->sync = $sync;
+
+        $controller = $this->getMockBuilder(BunnyConsoleController::class)->disableOriginalConstructor()
+            ->onlyMethods(['stdout', 'stderr'])->getMock();
+        $controller->videoId = '757bb740-a71b-4529-a012-528021c31a92';
+        $controller->expects(self::once())->method('stderr')->with(self::stringContains('Bunny is down'), self::anything())->willReturn(1);
+        $controller->expects(self::once())->method('stdout')->with("Synced 0 item(s), 1 failed.\n")->willReturn(1);
+
+        self::assertSame(\yii\console\ExitCode::TEMPFAIL, $controller->actionSync());
+    }
 }
 
 /**
@@ -133,6 +178,16 @@ class BunnyGatingPlugin extends Plugin
      */
     public Settings $testSettings;
 
+    /**
+     * @var ?MediaItems
+     */
+    public ?MediaItems $items = null;
+
+    /**
+     * @var ?BunnySync
+     */
+    public ?BunnySync $sync = null;
+
     // Public Methods
     // =========================================================================
 
@@ -149,5 +204,15 @@ class BunnyGatingPlugin extends Plugin
     public function getBunnyEnabled(): bool
     {
         return $this->bunny;
+    }
+
+    public function getMediaItems(): MediaItems
+    {
+        return $this->items ?? parent::getMediaItems();
+    }
+
+    public function getBunnySync(): BunnySync
+    {
+        return $this->sync ?? parent::getBunnySync();
     }
 }

@@ -33,6 +33,7 @@ class MediaChrome extends PlayerEngine
      */
     public const SCRIPT_MAP = [
         'hls' => 'hls-video-element@1',
+        'bunny' => 'hls-video-element@1',
         'dash' => 'dash-video-element@0',
         'shaka' => 'shaka-video-element@0',
         'mux' => '@mux/mux-video@0',
