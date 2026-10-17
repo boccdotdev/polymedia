@@ -279,6 +279,14 @@ class Settings extends Model
      */
     public ?string $bunnyWebhookKey = null;
 
+    /**
+     * @var bool When true, hard-deleting a Bunny `.pmedia` also deletes the video
+     * from its Bunny library. Requires Pro and credentials for that library.
+     * Default off; trashing never deletes the video.
+     * @since 2.5.0
+     */
+    public bool $deleteBunnyAssetOnDelete = false;
+
     // Public Methods
     // =========================================================================
 
@@ -432,6 +440,7 @@ class Settings extends Model
                 'autoFetchPoster',
                 'warnOnSignedUrlInPublicVolume',
                 'deleteMuxAssetOnDelete',
+                'deleteBunnyAssetOnDelete',
             ],
             'boolean',
         ];

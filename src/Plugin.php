@@ -583,8 +583,9 @@ class Plugin extends BasePlugin
      *
      * Soft delete leaves records intact for trash restore. Hard delete removes
      * the item record and its explicitly owned sidecar folder, and optionally
-     * deletes the remote Mux asset when
-     * {@see Settings::$deleteMuxAssetOnDelete} is enabled.
+     * deletes the remote Mux asset or Bunny video when
+     * {@see Settings::$deleteMuxAssetOnDelete} or
+     * {@see Settings::$deleteBunnyAssetOnDelete} is enabled.
      */
     private function _registerAssetDeleteHandler(): void
     {
@@ -622,6 +623,7 @@ class Plugin extends BasePlugin
                 $record = $deleting[(int)$asset->id] ?? null;
                 unset($deleting[(int)$asset->id]);
                 $this->_maybeDeleteMuxAsset($record);
+                $this->_maybeDeleteBunnyAsset($record);
 
                 $cleanup = function() use ($asset): bool {
                     $this->getSidecarStorage()->deleteForAsset($asset);
@@ -709,6 +711,43 @@ class Plugin extends BasePlugin
                 "Polymedia: failed to delete Mux asset {$muxAssetId}: {$e->getMessage()}",
                 __METHOD__,
             );
+        }
+    }
+
+    /**
+     * Deletes the remote Bunny video when the setting is on, Pro is active and
+     * the configured credentials belong to the video's own library.
+     *
+     * The selected provider doesn't matter: older Bunny assets keep their
+     * library. Failures are logged and don't block local Craft cleanup.
+     *
+     * @param ?MediaItemRecord $record the hard-deleted item
+     */
+    private function _maybeDeleteBunnyAsset(?MediaItemRecord $record): void
+    {
+        if (!$record || $record->type !== 'bunny' || !$this->getSettings()->deleteBunnyAssetOnDelete) {
+            return;
+        }
+
+        $metadata = $this->getMediaItems()->getMetadata($record);
+        $libraryId = (string)($metadata['bunnyLibraryId'] ?? '');
+        $videoId = (string)($metadata['bunnyVideoId'] ?? '');
+
+        if (!$this->getBunnyEnabled() || $videoId === '' || $libraryId === '' || $libraryId !== $this->getBunny()->getLibraryId()) {
+            Craft::warning(
+                "Polymedia: deleteBunnyAssetOnDelete is on, but Pro and credentials for the video's own Bunny library are required; " .
+                "skipping Bunny delete for Craft asset #{$record->assetId}.",
+                __METHOD__,
+            );
+
+            return;
+        }
+
+        try {
+            $this->getBunny()->deleteAsset($videoId);
+            Craft::info("Polymedia: deleted Bunny video {$videoId} after hard-delete of Craft asset #{$record->assetId}.", __METHOD__);
+        } catch (\Throwable $e) {
+            Craft::error("Polymedia: failed to delete Bunny video {$videoId}: {$e->getMessage()}", __METHOD__);
         }
     }
 

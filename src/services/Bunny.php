@@ -469,6 +469,21 @@ class Bunny extends Component
     }
 
     /**
+     * Deletes a video from the library.
+     *
+     * @param string $videoId the video ID
+     * @throws \RuntimeException when Bunny isn't configured or the request fails
+     * @throws \InvalidArgumentException when the ID is invalid
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function deleteAsset(string $videoId): void
+    {
+        $this->_api('DELETE', '/videos/' . self::validateVideoId($videoId));
+    }
+
+    /**
      * Returns the upload signature Bunny's tus endpoint expects.
      *
      * @param string $libraryId the library ID

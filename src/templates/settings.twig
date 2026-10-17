@@ -378,6 +378,15 @@
             disabled: not allowAdminChanges,
         }) }}
 
+        {{ forms.lightswitchField({
+            label: 'Delete Bunny video when Craft asset is deleted'|t('polymedia'),
+            instructions: 'When enabled, hard-deleting a Bunny `.pmedia` asset also deletes the video from its Bunny library, as long as these credentials belong to that library. Trashing an asset never deletes the video. Default off.'|t('polymedia'),
+            id: 'deleteBunnyAssetOnDelete',
+            name: 'deleteBunnyAssetOnDelete',
+            on: settings.deleteBunnyAssetOnDelete,
+            disabled: not allowAdminChanges,
+        }) }}
+
         {{ forms.autosuggestField({
             label: 'Bunny Webhook Verification Key'|t('polymedia'),
             instructions: 'Optional. Select an environment variable such as `$BUNNY_WEBHOOK_KEY` that holds this library’s read-only API key, which Bunny uses to sign webhooks. Leave empty to disable the webhook endpoint; upload polling and console sync still work. Literal values cannot be saved to project config.'|t('polymedia'),
