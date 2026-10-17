@@ -13,7 +13,6 @@ use boccdotdev\polymedia\models\Settings;
 use boccdotdev\polymedia\Plugin;
 use Craft;
 use craft\models\Volume;
-use craft\models\VolumeFolder;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -36,13 +35,13 @@ class PolymediaFieldRoutingTest extends TestCase
     protected function setUp(): void
     {
         $this->_previousApp = Craft::$app;
-        $folder = $this->getMockBuilder(VolumeFolder::class)->onlyMethods(['getVolume'])->getMock();
-        $folder->method('getVolume')->willReturn(new Volume(['uid' => 'videos']));
-        $assets = $this->createMock(\craft\services\Assets::class);
-        $assets->method('getFolderById')->willReturn($folder);
+        $volumes = $this->createMock(\craft\services\Volumes::class);
+        $volumes->method('getVolumeByUid')->willReturnCallback(
+            fn(string $uid) => in_array($uid, ['videos', 'images'], true) ? new Volume(['uid' => $uid]) : null,
+        );
         $app = $this->getMockBuilder(\craft\web\Application::class)->disableOriginalConstructor()
-            ->onlyMethods(['getAssets'])->getMock();
-        $app->method('getAssets')->willReturn($assets);
+            ->onlyMethods(['getVolumes'])->getMock();
+        $app->method('getVolumes')->willReturn($volumes);
         Craft::$app = $app;
     }
 
@@ -78,7 +77,42 @@ class PolymediaFieldRoutingTest extends TestCase
         $field = $this->getMockBuilder(PolymediaField::class)->disableOriginalConstructor()
             ->onlyMethods(['resolveDynamicPathToFolderId'])->getMock();
         $field->allowedProviders = $providers;
-        $field->method('resolveDynamicPathToFolderId')->willReturn(10);
+        $field->defaultUploadLocationSource = 'volume:videos';
+        // Resolving the dynamic subpath creates folders, so rendering must not.
+        $field->expects(self::never())->method('resolveDynamicPathToFolderId');
+
+        self::assertSame($expected, $field->getRoutesUploads(null));
+    }
+
+    public static function locations(): array
+    {
+        return [
+            'restricted to a routed volume' => [true, 'volume:videos', 'volume:images', true],
+            'restricted to another volume' => [true, 'volume:images', 'volume:videos', false],
+            'default upload location' => [false, 'volume:images', 'volume:videos', true],
+            'unknown volume' => [false, null, 'volume:missing', false],
+            'no upload location' => [false, null, null, false],
+        ];
+    }
+
+    #[DataProvider('locations')]
+    public function testUploadVolumeComesFromTheLocationSource(bool $restrict, ?string $restricted, ?string $default, bool $expected): void
+    {
+        $plugin = $this->getMockBuilder(Plugin::class)->disableOriginalConstructor()
+            ->onlyMethods(['getSettings', 'getVideoEnabled'])->getMock();
+        $plugin->method('getSettings')->willReturn(new Settings([
+            'autoRouteVideoUploads' => true,
+            'videoUploadVolumeUids' => ['videos'],
+        ]));
+        $plugin->method('getVideoEnabled')->willReturn(true);
+        Craft::$app->loadedModules[Plugin::class] = $plugin;
+
+        $field = $this->getMockBuilder(PolymediaField::class)->disableOriginalConstructor()
+            ->onlyMethods(['resolveDynamicPathToFolderId'])->getMock();
+        $field->restrictLocation = $restrict;
+        $field->restrictedLocationSource = $restricted;
+        $field->defaultUploadLocationSource = $default;
+        $field->expects(self::never())->method('resolveDynamicPathToFolderId');
 
         self::assertSame($expected, $field->getRoutesUploads(null));
     }
