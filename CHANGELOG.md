@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.3.0 - 2026-10-17
 
 ### Added
 - Mux items now store the aspect ratio Mux reports (`metadata.aspectRatio`, e.g. `16:9`) and the video track's dimensions from import, upload, `sync-status`, and webhooks. New `craft.polymedia.aspectRatio(asset)` / `asset.getAspectRatio()` return it as a CSS `aspect-ratio` value (`16 / 9`) so templates can reserve the player's box before the video loads. Run `craft polymedia/mux/sync-status` to fill it in for existing items. ([#5](https://github.com/boccdotdev/polymedia/issues/5))
