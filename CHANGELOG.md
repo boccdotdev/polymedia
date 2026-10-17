@@ -1,9 +1,13 @@
 # Changelog
 
-## 2.3.0 - 2026-10-17
+## 2.4.0 - Unreleased
 
 ### Added
 - Optional Video.js v10 player engine. A new **Player Engine** setting (env-var capable, so one environment can try it first) switches `player()`, `element()` and `scripts()` site-wide from Media Chrome to Video.js. Players use a packaged skin (**Video.js Skin** setting or a `skin` option), reserve their box with the stored aspect ratio (`aspectRatio` option to override), translate to the site language, and accept your own controls through `children`. `craft.polymedia.playerEngine` reports the active engine. Examples in `examples/videojs/` show a brand theme and a Media Chrome look-alike that keeps a site's Media Chrome styling. Scripts load from `@videojs/cdn` pinned to the **Video.js Version** setting. Media Chrome stays the default, and its markup is unchanged. ([#3](https://github.com/boccdotdev/polymedia/issues/3))
+
+## 2.3.0 - 2026-10-17
+
+### Added
 - Mux items now store the aspect ratio Mux reports (`metadata.aspectRatio`, e.g. `16:9`) and the video track's dimensions from import, upload, `sync-status`, and webhooks. New `craft.polymedia.aspectRatio(asset)` / `asset.getAspectRatio()` return it as a CSS `aspect-ratio` value (`16 / 9`) so templates can reserve the player's box before the video loads. Run `craft polymedia/mux/sync-status` to fill it in for existing items. ([#5](https://github.com/boccdotdev/polymedia/issues/5))
 
 ### Fixed
