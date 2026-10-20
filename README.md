@@ -111,9 +111,10 @@ Both player engines render the result: an HLS element (`mux-video`, or the HLS e
 1. Select **Bunny Stream** as the video hosting provider.
 2. Enter the Stream **library ID**, the library's **API key** and its delivery hostname, such as `vz-example.b-cdn.net`.
 3. Keep the key in your environment and select a reference such as `$BUNNY_API_KEY`. Use the library's own API key, not your account API key. Polymedia rejects literal keys, and the key never reaches the browser. The library ID and hostname accept environment references too.
-4. Use **Browse video library** to search and import existing videos, or **Upload video** for a signed, resumable browser upload (tus).
+4. In the Bunny library's **Security** settings, turn off **Block direct URL file access** and **Token authentication**.
+5. Use **Browse video library** to search and import existing videos, or **Upload video** for a signed, resumable browser upload (tus).
 
-Only anonymous HLS playback from the native `*.b-cdn.net` host is supported. Polymedia checks the public playlist before importing. Token authentication, referrer-restricted libraries, DRM and custom CDN domains aren't supported. Each imported asset keeps the library ID, video ID and hostname it was imported with.
+Only anonymous HLS playback from the native `*.b-cdn.net` host is supported. Polymedia checks the playlist from your server before importing, and fetches posters the same way. Those requests carry no referrer, so with **Block direct URL file access** on, Bunny answers `403` and imports and uploads fail with "Bunny refused anonymous playback". Token authentication, DRM and custom CDN domains aren't supported either. Each imported asset keeps the library ID, video ID and hostname it was imported with.
 
 Uploads poll until Bunny has encoded the video and its playlist is public. Cancelling an upload stops the browser transfer, but a video Bunny has already created stays in the library. If an upload finishes but creating the Craft asset is interrupted, import the video with **Browse video library**; delete unwanted incomplete videos in the Bunny dashboard.
 

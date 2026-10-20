@@ -94,8 +94,12 @@ class BunnySync extends Component
 
             $state = $bunny->getAsset($videoId);
 
+            if ($state['isPublic'] === false) {
+                throw new \RuntimeException(Bunny::PROTECTED_PLAYBACK_MESSAGE);
+            }
+
             if ($state['isPublic'] !== true) {
-                throw new \RuntimeException('Wait until processing finishes and allow anonymous native HLS playback. Token, referrer and DRM protected libraries are not supported.');
+                throw new \RuntimeException('Wait until Bunny finishes processing this video, then retry.');
             }
 
             $title = trim($title) ?: ((string)$state['title'] ?: "Bunny {$videoId}");

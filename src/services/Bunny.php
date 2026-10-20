@@ -49,6 +49,12 @@ class Bunny extends Component
     public const TUS_ENDPOINT = self::API_BASE . '/tusupload';
 
     /**
+     * @var string Shown when the CDN refuses a playlist request without a token or referrer.
+     * @since 2.5.0
+     */
+    public const PROTECTED_PLAYBACK_MESSAGE = 'Bunny refused anonymous playback. In the library\'s security settings, turn off Block direct URL file access and token authentication, then retry. DRM protected libraries are not supported.';
+
+    /**
      * @var array Guzzle options for anonymous CDN probes.
      */
     private const CDN_OPTIONS = [
@@ -564,9 +570,7 @@ class Bunny extends Component
             'uploadId' => $videoId,
             'ready' => $asset['status'] === 'ready' && $asset['isPublic'] === true,
             'failed' => in_array($asset['status'], ['errored', 'deleted'], true) || $asset['isPublic'] === false,
-            'message' => $asset['isPublic'] === false
-                ? 'Anonymous native HLS playback is unavailable. Token, referrer and DRM protected libraries are not supported.'
-                : null,
+            'message' => $asset['isPublic'] === false ? self::PROTECTED_PLAYBACK_MESSAGE : null,
         ];
     }
 
