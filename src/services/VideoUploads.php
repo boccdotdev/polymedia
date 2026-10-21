@@ -16,6 +16,8 @@ use boccdotdev\polymedia\Plugin;
 use Craft;
 use craft\base\ElementInterface;
 use craft\elements\Asset;
+use craft\errors\InvalidFsException;
+use craft\errors\InvalidSubpathException;
 use craft\fields\Assets as AssetsField;
 use craft\helpers\Json;
 use craft\models\VolumeFolder;
@@ -326,11 +328,12 @@ class VideoUploads extends Component
      * Resolves the destination folder, field and owner element.
      *
      * An explicit folder that's invalid or not writable is refused, never
-     * swapped for another volume.
+     * swapped for another volume. As with Craft's uploads, the user's own
+     * temporary upload folder is accepted, but routed MP4s never go there.
      *
      * @param array $input `folderId`, `fieldId`, `elementId`, `siteId`, `routing`
      * @return array{0: VolumeFolder, 1: ?AssetsField, 2: ?ElementInterface}
-     * @throws ForbiddenHttpException when the user can't upload there
+     * @throws ForbiddenHttpException when the user can't upload there or the field's upload location is invalid
      * @throws BadRequestHttpException when the field isn't an Assets field
      */
     private function _destination(array $input): array
@@ -346,7 +349,11 @@ class VideoUploads extends Component
             [$field, $owner] = $plugin->getFieldMedia()->resolveField($input);
 
             if (!$folderId) {
-                $folderId = (int)$field->resolveDynamicPathToFolderId($owner);
+                try {
+                    $folderId = (int)$field->resolveDynamicPathToFolderId($owner);
+                } catch (InvalidFsException | InvalidSubpathException $e) {
+                    throw new ForbiddenHttpException($e->getMessage(), 0, $e);
+                }
             }
         }
 
@@ -358,7 +365,9 @@ class VideoUploads extends Component
             $folder = null;
         }
 
-        if (!$folder || !$user || !$user->can('saveAssets:' . $folder->getVolume()->uid)) {
+        $temporary = $folder && $user && empty($input['routing']) && ManifestWriter::isTemporaryFolder($folder, $user);
+
+        if (!$folder || !$user || (!$temporary && ($folder->volumeId === null || !$user->can('saveAssets:' . $folder->getVolume()->uid)))) {
             throw new ForbiddenHttpException('Choose a writable asset folder for the video.');
         }
 

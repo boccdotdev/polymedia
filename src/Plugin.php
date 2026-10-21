@@ -1307,6 +1307,7 @@ class Plugin extends BasePlugin
                 $view->registerAssetBundle(PolymediaAsset::class);
                 $view->registerTranslations('polymedia', [
                     'Add video or audio',
+                    'Could not add video or audio.',
                     'From URL',
                     'Paste a YouTube, Vimeo, HLS, or other media URL',
                     'Browse video library',
@@ -1598,9 +1599,10 @@ JS);
     }
 
     /**
-     * Renders the Add video or audio menu config beside the inputs of Assets
-     * fields that explicitly allow the Polymedia kind, for the CP script to
-     * pick up when the input initializes.
+     * Renders the Add video or audio menu config right after the inputs of
+     * Assets fields that explicitly allow the Polymedia kind, for the CP
+     * script to pick up when the input initializes. Inline editing in element
+     * indexes doesn't get the menu.
      */
     private function _registerFieldMediaMenu(): void
     {
@@ -1614,12 +1616,12 @@ JS);
             function(DefineFieldHtmlEvent $event) {
                 /** @var AssetsField $field */
                 $field = $event->sender;
-                $menu = $this->getFieldMedia()->getMenu($field);
+                $menu = $event->inline ? null : $this->getFieldMedia()->getMenu($field);
 
                 if ($menu !== null) {
                     $event->html .= Html::tag('div', '', [
                         'class' => 'hidden',
-                        'data' => ['polymedia-field-media' => $menu],
+                        'data' => ['polymedia-field-media' => $menu + ['fieldId' => (int)$field->id]],
                     ]);
                 }
             },

@@ -15,6 +15,7 @@ use boccdotdev\polymedia\Plugin;
 use Craft;
 use craft\elements\Asset;
 use craft\web\Controller;
+use yii\base\InvalidConfigException;
 use yii\web\BadRequestHttpException;
 use yii\web\ForbiddenHttpException;
 use yii\web\Response;
@@ -75,7 +76,7 @@ class FieldMediaController extends Controller
         try {
             $selectable = $asset instanceof Asset
                 && Plugin::getInstance()->getFieldMedia()->isSelectable($this->_fieldInput(), $asset);
-        } catch (BadRequestHttpException | ForbiddenHttpException) {
+        } catch (BadRequestHttpException | ForbiddenHttpException | InvalidConfigException) {
             $selectable = false;
         }
 

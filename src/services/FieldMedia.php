@@ -17,9 +17,13 @@ use boccdotdev\polymedia\Plugin;
 use Craft;
 use craft\base\ElementInterface;
 use craft\elements\Asset;
+use craft\errors\InvalidFsException;
+use craft\errors\InvalidSubpathException;
 use craft\fields\Assets as AssetsField;
+use craft\helpers\Assets as AssetsHelper;
 use craft\models\VolumeFolder;
 use yii\base\Component;
+use yii\base\InvalidConfigException;
 use yii\web\BadRequestHttpException;
 use yii\web\ForbiddenHttpException;
 
@@ -159,11 +163,27 @@ class FieldMedia extends Component
     }
 
     /**
+     * Returns whether a field lets editors add new assets to it.
+     *
+     * Polymedia fields always do; they store Allow Uploads off on purpose.
+     *
+     * @param AssetsField $field the field
+     * @return bool
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public static function allowsAdding(AssetsField $field): bool
+    {
+        return $field instanceof PolymediaField || $field->allowUploads;
+    }
+
+    /**
      * Returns the menu a field's input renders with, or null when the field
      * doesn't offer one.
      *
-     * `canAdd` is false when the current user can't save assets to the
-     * field's upload volume. It only hides the button.
+     * `canAdd` is false when the field doesn't allow uploads or the current
+     * user can't save assets to its upload volume. It only hides the button.
      *
      * @param AssetsField $field the field
      * @return ?array{items: string[], canAdd: bool}
@@ -184,6 +204,7 @@ class FieldMedia extends Component
         return [
             'items' => $items,
             'canAdd' => $items !== []
+                && self::allowsAdding($field)
                 && $user !== null
                 && $volumeUid !== null
                 && $volumeUid !== Plugin::getInstance()->getSettings()->sidecarVolumeUid
@@ -233,12 +254,15 @@ class FieldMedia extends Component
      * Returns the folder a field's new `.pmedia` assets go to.
      *
      * Resolves the field's upload location for the element the way Craft's
-     * own field uploads do, so a dynamic subpath may create its folder.
+     * own field uploads do, so a dynamic subpath may create its folder. For a
+     * new or draft element whose subpath can't be resolved yet, that's the
+     * user's temporary upload folder, and Craft moves the asset into place
+     * when the element is saved.
      *
      * @param array $input `fieldId`, `elementId`, `siteId`
      * @return VolumeFolder
      * @throws BadRequestHttpException when the field isn't an Assets field
-     * @throws ForbiddenHttpException when the field doesn't offer media or the user can't add to it
+     * @throws ForbiddenHttpException when the field doesn't offer media, its upload location is invalid or the user can't add to it
      *
      * @author boccdotdev
      * @since 2.5.0
@@ -251,15 +275,23 @@ class FieldMedia extends Component
             throw new ForbiddenHttpException('This field does not accept video or audio.');
         }
 
+        if (!self::allowsAdding($field)) {
+            throw new ForbiddenHttpException('This field does not allow uploads.');
+        }
+
         $user = Craft::$app->getUser()->getIdentity();
 
         try {
             $folder = Craft::$app->getAssets()->getFolderById($field->resolveDynamicPathToFolderId($owner));
-        } catch (\craft\errors\InvalidFsException | \craft\errors\InvalidSubpathException) {
-            $folder = null;
+        } catch (InvalidFsException | InvalidSubpathException $e) {
+            // Craft's own message, e.g. an invalid subpath on a saved element.
+            throw new ForbiddenHttpException($e->getMessage(), 0, $e);
         }
 
-        // A folder without a volume is the user's temporary upload folder.
+        if ($folder && $user && ManifestWriter::isTemporaryFolder($folder, $user)) {
+            return $folder;
+        }
+
         if (!$folder || !$folder->volumeId || !$user || !$user->can('saveAssets:' . $folder->getVolume()->uid)) {
             throw new ForbiddenHttpException('You cannot add media to this field’s upload location.');
         }
@@ -274,25 +306,35 @@ class FieldMedia extends Component
     /**
      * Requires a folder to be within a field's upload location or sources.
      *
+     * The user's temporary upload folder always qualifies: Craft moves its
+     * assets into the field's folder when the element is saved.
+     *
      * @param AssetsField $field the field
      * @param ?ElementInterface $owner the element that owns the field
      * @param VolumeFolder $folder the folder
      * @throws ForbiddenHttpException when the folder is outside the field's reach
+     * @throws InvalidConfigException when the folder's volume is missing
      *
      * @author boccdotdev
      * @since 2.5.0
      */
     public function checkLocation(AssetsField $field, ?ElementInterface $owner, VolumeFolder $folder): void
     {
+        $user = Craft::$app->getUser()->getIdentity();
+
+        if ($user && ManifestWriter::isTemporaryFolder($folder, $user)) {
+            return;
+        }
+
         if ($field->restrictLocation) {
-            $rootId = (int)$field->resolveDynamicPathToFolderId($owner);
-            $candidate = $folder;
+            $root = $this->_restrictedRoot($field, $owner);
 
-            while ($candidate && (int)$candidate->id !== $rootId && $field->allowSubfolders && $candidate->parentId) {
-                $candidate = Craft::$app->getAssets()->getFolderById((int)$candidate->parentId);
-            }
+            // The way Craft keeps related assets in a restricted location.
+            $inside = $root !== null && (int)$folder->volumeId === (int)$root->volumeId && ($field->allowSubfolders
+                ? str_starts_with((string)$folder->path, (string)$root->path)
+                : (int)$folder->id === (int)$root->id);
 
-            if (!$candidate || (int)$candidate->id !== $rootId) {
+            if (!$inside) {
                 throw new ForbiddenHttpException('The destination is outside this field’s upload location.');
             }
 
@@ -316,6 +358,7 @@ class FieldMedia extends Component
      * @return bool
      * @throws BadRequestHttpException when the field isn't an Assets field
      * @throws ForbiddenHttpException when the user can't save the element or the field isn't in its layout
+     * @throws InvalidConfigException when the asset's folder or volume is missing
      *
      * @author boccdotdev
      * @since 2.5.0
@@ -333,10 +376,8 @@ class FieldMedia extends Component
             return false;
         }
 
-        $folder = $asset->getFolder();
-
         try {
-            $this->checkLocation($field, $owner, $folder);
+            $this->checkLocation($field, $owner, $asset->getFolder());
         } catch (ForbiddenHttpException) {
             return false;
         }
@@ -362,5 +403,41 @@ class FieldMedia extends Component
         }
 
         return true;
+    }
+
+    // Private Methods
+    // =========================================================================
+
+    /**
+     * Returns a restricted field's root folder for an element, or null when
+     * it doesn't exist or can't be resolved yet.
+     *
+     * Never creates folders. Craft 5.9 can resolve the root on its own; older
+     * versions fall back to the field's default upload folder.
+     *
+     * @param AssetsField $field the field
+     * @param ?ElementInterface $owner the element that owns the field
+     * @return ?VolumeFolder
+     */
+    private function _restrictedRoot(AssetsField $field, ?ElementInterface $owner): ?VolumeFolder
+    {
+        $parts = is_string($field->restrictedLocationSource) ? explode(':', $field->restrictedLocationSource, 2) : [];
+        $volume = count($parts) === 2 && $parts[0] === 'volume'
+            ? Craft::$app->getVolumes()->getVolumeByUid($parts[1])
+            : null;
+
+        if (!$volume) {
+            return null;
+        }
+
+        try {
+            if (method_exists(AssetsHelper::class, 'resolveSubpath')) {
+                return AssetsHelper::resolveSubpath($volume, $field->restrictedLocationSubpath, $owner)[1];
+            }
+
+            return Craft::$app->getAssets()->getFolderById($field->resolveDynamicPathToFolderId($owner));
+        } catch (InvalidFsException | InvalidSubpathException) {
+            return null;
+        }
     }
 }

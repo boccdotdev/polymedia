@@ -14,6 +14,7 @@ use boccdotdev\polymedia\models\Settings;
 use boccdotdev\polymedia\Plugin;
 use boccdotdev\polymedia\services\FieldMedia;
 use boccdotdev\polymedia\services\ManifestWriter;
+use boccdotdev\polymedia\services\SidecarStorage;
 use boccdotdev\polymedia\services\ThumbnailDeriver;
 use boccdotdev\polymedia\services\UrlDetector;
 use Craft;
@@ -59,17 +60,20 @@ class MediaItemsFieldProvidersTest extends TestCase
         $deriver = $this->createMock(ThumbnailDeriver::class);
 
         $plugin = $this->getMockBuilder(Plugin::class)->disableOriginalConstructor()
-            ->onlyMethods(['getSettings', 'getManifestWriter', 'getUrlDetector', 'getThumbnailDeriver', 'getFieldMedia'])->getMock();
+            ->onlyMethods(['getSettings', 'getManifestWriter', 'getUrlDetector', 'getThumbnailDeriver', 'getFieldMedia', 'getSidecarStorage', 'getPosterFieldConfig'])->getMock();
         $plugin->method('getSettings')->willReturn(new Settings(['warnOnSignedUrlInPublicVolume' => false]));
         $plugin->method('getManifestWriter')->willReturn($this->writer);
         $plugin->method('getUrlDetector')->willReturn(new UrlDetector());
         $plugin->method('getThumbnailDeriver')->willReturn($deriver);
         $plugin->method('getFieldMedia')->willReturn(new FieldMedia());
+        $plugin->method('getSidecarStorage')->willReturn($this->createMock(SidecarStorage::class));
+        $plugin->method('getPosterFieldConfig')->willReturn([]);
         $app->loadedModules[Plugin::class] = $plugin;
 
         $request = $this->createMock(\craft\web\Request::class);
         $request->method('getBodyParam')->willReturnCallback(fn($key, $default = null) => $this->body[$key] ?? $default);
         $request->method('getRequiredBodyParam')->willReturnCallback(fn($key) => $this->body[$key]);
+        $request->method('getParam')->willReturnCallback(fn($key, $default = null) => $this->body[$key] ?? $default);
         $app->method('getRequest')->willReturn($request);
         $user = $this->createMock(\craft\web\User::class);
         $user->method('getIdentity')->willReturn($this->getMockBuilder(User::class)->disableOriginalConstructor()->getMock());
@@ -130,6 +134,40 @@ class MediaItemsFieldProvidersTest extends TestCase
 
         $this->expectExceptionMessage('created');
         $controller->actionCreate();
+    }
+
+    public static function screens(): array
+    {
+        return [
+            'field allowing YouTube' => [7, ['youtube']],
+            'no field' => [null, null],
+        ];
+    }
+
+    #[DataProvider('screens')]
+    public function testScreenOffersOnlyTheFieldsProviders(?int $fieldId, ?array $expected): void
+    {
+        $this->body = ['fieldId' => $fieldId];
+        $screen = new class() extends \craft\web\Response {
+            public array $variables = [];
+
+            public function __call($name, $params)
+            {
+                if ($name === 'contentTemplate') {
+                    $this->variables = $params[1];
+                }
+
+                return $this;
+            }
+        };
+        $controller = $this->getMockBuilder(MediaItemsController::class)->disableOriginalConstructor()
+            ->onlyMethods(['requireCpRequest', 'asCpScreen'])->getMock();
+        $controller->method('asCpScreen')->willReturn($screen);
+
+        $controller->actionCreateScreen();
+
+        self::assertSame($expected ?? (new UrlDetector())->getProviderTypes(), $screen->variables['providerTypes']);
+        self::assertSame($fieldId ?? '', $screen->variables['fieldId']);
     }
 
     // Protected Methods

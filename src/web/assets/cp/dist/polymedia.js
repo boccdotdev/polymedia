@@ -257,10 +257,15 @@
         return;
       }
 
-      var $marker = input.$container.nextAll('[data-polymedia-field-media]').first();
+      // The server renders it right after the field's own input.
+      var $marker = input.$container.next('[data-polymedia-field-media]');
       var config = $marker.length ? $marker.data('polymediaFieldMedia') : null;
 
-      if (!config || typeof config !== 'object') {
+      if (
+        !config ||
+        typeof config !== 'object' ||
+        Number(config.fieldId) !== Number(input.settings.fieldId)
+      ) {
         return;
       }
 
@@ -387,7 +392,7 @@
       } catch (error) {
         Craft.cp.displayError(Craft.Polymedia._errorMessage(
           error,
-          Craft.t('polymedia', 'Could not create media item.')
+          Craft.t('polymedia', 'Could not add video or audio.')
         ));
         return;
       }
@@ -515,10 +520,22 @@
         return null;
       }
 
-      var context = Craft.Polymedia.fieldContext(input);
       input._polymediaResolving = true;
 
       try {
+        // Someone who can't save the entry itself edits it through a draft,
+        // which Craft only creates on their first change. Create it now.
+        var editor = input.elementEditor;
+        if (
+          editor &&
+          editor.settings &&
+          !editor.settings.canSaveCanonical &&
+          typeof editor.ensureIsDraftOrRevision === 'function'
+        ) {
+          await editor.ensureIsDraftOrRevision();
+        }
+
+        var context = Craft.Polymedia.fieldContext(input);
         var response = await Craft.sendActionRequest('POST', 'polymedia/field-media/destination', {
           data: context,
         });
@@ -583,9 +600,9 @@
       if (Craft.Polymedia.isFieldPicker(assetIndex)) {
         var input = assetIndex.settings.modal.settings.polymediaInput;
 
-        if (input && input.settings) {
-          context.fieldId = input.settings.fieldId;
-          context.elementId = input.settings.sourceElementId;
+        if (input && input.settings && input.settings.fieldId) {
+          // The same field, element and site as the field's own menu.
+          Object.assign(context, Craft.Polymedia.fieldContext(input));
         }
       }
 
@@ -949,6 +966,7 @@
         }
       } catch (error) {
         // Creation/import succeeded, but field insertion did not.
+        console.warn('Polymedia: the media item could not be selected.', error);
       }
       Craft.cp.displayError(Craft.t(
         'polymedia',

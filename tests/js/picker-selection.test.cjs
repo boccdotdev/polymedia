@@ -480,15 +480,14 @@ test('explicit upload refuses a full field before any provider request', () => {
   assert.equal(s.requests.length, 0);
 });
 
-test('upload context carries the picker field and owner element', () => {
+test('upload context carries the picker field, draft element and owner site', () => {
   const s = setup();
-  s.input.settings = { fieldId: 7, sourceElementId: 8 };
   s.index.currentFolderId = 4;
-  const context = s.picker.uploadContext(s.index);
-  assert.equal(context.folderId, 4);
-  assert.equal(context.siteId, 2);
-  assert.equal(context.fieldId, 7);
-  assert.equal(context.elementId, 8);
+  assert.deepEqual({ ...s.picker.uploadContext(s.index) }, { folderId: 4, siteId: 2 });
+
+  s.input.settings = { fieldId: 7, sourceElementId: 8, referenceElementSiteId: 3 };
+  s.input.elementEditor = { getDraftElementId: (id) => (id === 8 ? 9 : id) };
+  assert.deepEqual({ ...s.picker.uploadContext(s.index) }, { folderId: 4, siteId: 3, fieldId: 7, elementId: 9 });
 });
 
 test('existing asset action is video-only and checks destination selection', async () => {
@@ -578,7 +577,7 @@ function fieldSetup({ config = { items: ['url', 'existing'], canAdd: true }, ...
       viewMode: 'large',
     },
     $container: {
-      nextAll: () => ({ first: () => (config ? { length: 1, data: () => config } : { length: 0 }) }),
+      next: () => (config ? { length: 1, data: () => ({ fieldId: 7, ...config }) } : { length: 0 }),
     },
     $addElementBtn: { length: 1, prop: () => false },
     enableAddElementsBtn() { states.push('enable'); },
@@ -593,7 +592,13 @@ function fieldSetup({ config = { items: ['url', 'existing'], canAdd: true }, ...
 }
 
 test('the field button needs the field menu and permission to add', () => {
-  for (const config of [null, { items: ['url'], canAdd: false }, { items: [], canAdd: true }]) {
+  // Another field's menu must not be adopted either.
+  for (const config of [
+    null,
+    { items: ['url'], canAdd: false },
+    { items: [], canAdd: true },
+    { items: ['url'], canAdd: true, fieldId: 8 },
+  ]) {
     const s = fieldSetup({ config });
     s.picker.initFieldButton(s.input);
     assert.equal(s.nodes.length, 0);
@@ -643,6 +648,39 @@ test('the field destination comes from the server for the draft being edited', a
   assert.equal(destination.canAccept(), true);
 });
 
+test('the draft is created first for someone who cannot save the entry itself', async () => {
+  const s = fieldSetup();
+  const calls = [];
+  const drafts = {};
+  s.input.elementEditor = {
+    settings: { canSaveCanonical: false },
+    ensureIsDraftOrRevision: async () => { calls.push('draft'); drafts[8] = 15; },
+    getDraftElementId: (id) => drafts[id] || id,
+  };
+  s.Craft.sendActionRequest = async (_method, action, options) => {
+    calls.push(action);
+    s.requests.push({ data: options.data });
+    return { data: { folderId: 12 } };
+  };
+  await s.picker.fieldDestination(s.input);
+  assert.deepEqual(calls, ['draft', 'polymedia/field-media/destination']);
+  assert.equal(s.requests[0].data.elementId, 15);
+
+  // Editors who can save the entry don't get a draft just for opening the menu.
+  calls.length = 0;
+  s.input.elementEditor.settings.canSaveCanonical = true;
+  await s.picker.fieldDestination(s.input);
+  assert.deepEqual(calls, ['polymedia/field-media/destination']);
+});
+
+test('the field context falls back to the relation site', () => {
+  const s = fieldSetup();
+  delete s.input.settings.referenceElementSiteId;
+  assert.equal(s.picker.fieldContext(s.input).siteId, 2);
+  delete s.input.settings.criteria.siteId;
+  assert.equal(s.picker.fieldContext(s.input).siteId, 1);
+});
+
 test('a full or busy field resolves no destination', async () => {
   const full = fieldSetup({ selected: [1], limit: 1 });
   assert.equal(await full.picker.fieldDestination(full.input), null);
@@ -664,8 +702,36 @@ test('a refused destination reports the server message and opens nothing', async
   await s.picker.open({ open: 'openSlideout' }, async () => {
     throw { response: { data: { message: 'You cannot add media to this field’s upload location.' } } };
   });
+  await s.picker.open({ open: 'openSlideout' }, async () => { throw new Error('offline'); });
   assert.equal(opened, false);
-  assert.deepEqual(s.errors, ['You cannot add media to this field’s upload location.']);
+  assert.deepEqual(s.errors, ['You cannot add media to this field’s upload location.', 'Could not add video or audio.']);
+});
+
+test('select inputs get the field button when they initialize', () => {
+  const initialized = [];
+  function AssetSelectInput() {}
+  AssetSelectInput.prototype.init = function (settings) {
+    initialized.push(settings.id);
+    this.settings = settings;
+  };
+  AssetSelectInput.extend = () => function PosterInput() {};
+  const Craft = {
+    AssetSelectInput,
+    t: (_category, text) => text,
+  };
+  vm.runInNewContext(source, {
+    Craft,
+    window: { CraftPolymediaConfig: {} },
+    $: (value) => value,
+    Garnish: { Modal: { extend: (definition) => definition }, $doc: { ready() {} } },
+  });
+  const seen = [];
+  Craft.Polymedia.initFieldButton = (input) => seen.push(input.settings.id);
+  const input = new AssetSelectInput();
+  input.init({ id: 'fields-polymedia' });
+  // Craft's own init runs first, then the button.
+  assert.deepEqual(initialized, ['fields-polymedia']);
+  assert.deepEqual(seen, ['fields-polymedia']);
 });
 
 function prepareFieldSelection(s, { selectable = true } = {}) {

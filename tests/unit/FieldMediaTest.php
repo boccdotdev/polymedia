@@ -95,6 +95,12 @@ class FieldMediaTest extends TestCase
         $assets = $this->createMock(\craft\services\Assets::class);
         $assets->method('getFolderById')->willReturnCallback(fn($id) => $this->folders[$id] ?? null);
         $assets->method('getAssetById')->willReturnCallback(fn($id) => $this->assets[$id] ?? null);
+        $assets->method('getUserTemporaryUploadFolder')->willReturnCallback(fn() => $this->folders[40]);
+        $assets->method('getRootFolderByVolumeId')->willReturnCallback(fn($id) => $this->folders[$id] ?? null);
+        $assets->method('findFolder')->willReturnCallback(fn(array $criteria) => current(array_filter(
+            $this->folders,
+            fn(VolumeFolder $folder) => $folder->volumeId === $criteria['volumeId'] && $folder->path === $criteria['path'],
+        )) ?: null);
         $app->method('getAssets')->willReturn($assets);
         $fields = $this->createMock(\craft\services\Fields::class);
         $fields->method('getFieldById')->willReturnCallback(fn($id) => $this->fields[$id] ?? null);
@@ -103,17 +109,29 @@ class FieldMediaTest extends TestCase
         $elements->method('getElementById')->willReturnCallback(fn($id) => $this->owners[$id] ?? null);
         $app->method('getElements')->willReturn($elements);
         $volumes = $this->createMock(\craft\services\Volumes::class);
+        $volumeIds = ['videos' => 10, 'ordinary' => 20, 'sidecar' => 30];
         $volumes->method('getVolumeByUid')->willReturnCallback(
-            fn(string $uid) => in_array($uid, ['videos', 'ordinary', 'sidecar'], true) ? new Volume(['uid' => $uid]) : null,
+            fn(string $uid) => isset($volumeIds[$uid]) ? new Volume(['id' => $volumeIds[$uid], 'uid' => $uid]) : null,
         );
         $app->method('getVolumes')->willReturn($volumes);
+        $config = $this->createMock(\craft\services\Config::class);
+        $config->method('getGeneral')->willReturn(new \craft\config\GeneralConfig());
+        $app->method('getConfig')->willReturn($config);
 
-        foreach ([10 => 'videos', 20 => 'ordinary', 30 => 'sidecar', 40 => 'temp'] as $id => $uid) {
+        // Volume roots, `films/` with a subfolder, and `other/` in the videos volume.
+        $folders = [
+            10 => ['videos', ''], 20 => ['ordinary', ''], 30 => ['sidecar', ''],
+            11 => ['videos', 'films/'], 12 => ['videos', 'films/2025/'], 13 => ['videos', 'other/'],
+            // The user's temporary upload folder and someone else's have no volume.
+            40 => ['temp', null], 41 => ['temp', null],
+        ];
+
+        foreach ($folders as $id => [$uid, $path]) {
             $folder = $this->getMockBuilder(VolumeFolder::class)->onlyMethods(['getVolume'])->getMock();
             $folder->id = $id;
-            // The temporary upload folder has no volume ID.
-            $folder->volumeId = $uid === 'temp' ? null : $id;
-            $folder->method('getVolume')->willReturn(new Volume(['id' => $id, 'uid' => $uid]));
+            $folder->volumeId = $volumeIds[$uid] ?? null;
+            $folder->path = $path;
+            $folder->method('getVolume')->willReturn(new Volume(['id' => $volumeIds[$uid] ?? null, 'uid' => $uid]));
             $this->folders[$id] = $folder;
         }
     }
@@ -186,6 +204,16 @@ class FieldMediaTest extends TestCase
         ];
     }
 
+    public function testTheButtonFollowsAllowUploadsExceptOnPolymediaFields(): void
+    {
+        foreach ([false, true] as $native) {
+            $field = $this->field(native: $native);
+            $field->allowUploads = false;
+
+            self::assertSame(!$native, $this->service->getMenu($field)['canAdd']);
+        }
+    }
+
     #[DataProvider('addPermissions')]
     public function testTheButtonNeedsPermissionToSaveToTheUploadVolume(?string $source, array $writable, bool $expected): void
     {
@@ -208,12 +236,23 @@ class FieldMediaTest extends TestCase
         self::assertSame(20, (int)$this->service->getDestination(['fieldId' => 7, 'elementId' => 8, 'siteId' => 1])->id);
     }
 
+    public function testNewDraftsUseTheUsersTemporaryFolderLikeCraftsUploads(): void
+    {
+        $this->owner(8);
+        $this->field(40);
+        // Temporary uploads need no volume permission; Craft moves them on save.
+        $this->writable = [];
+
+        self::assertSame(40, (int)$this->service->getDestination(['fieldId' => 7, 'elementId' => 8])->id);
+    }
+
     public static function destinationFailures(): array
     {
         return [
             'images only' => ['kind'],
+            'uploads off' => ['uploads'],
             'not writable' => ['writable'],
-            'temporary folder' => ['temp'],
+            'another user\'s temporary folder' => ['temp'],
             'sidecar' => ['sidecar'],
             'invalid subpath' => ['subpath'],
             'cannot save owner' => ['owner'],
@@ -225,14 +264,15 @@ class FieldMediaTest extends TestCase
     public function testDestinationRefusesWhatTheFieldOrUserDoesNotAllow(string $failure): void
     {
         $field = $this->field(match ($failure) {
-            'temp' => 40,
+            'temp' => 41,
             'sidecar' => 30,
             default => 10,
-        });
+        }, native: $failure === 'uploads');
         $this->owner(8, canSave: $failure !== 'owner', inLayout: $failure !== 'layout');
 
         match ($failure) {
             'kind' => $field->allowedKinds = ['image'],
+            'uploads' => $field->allowUploads = false,
             'writable' => $this->writable = [],
             'subpath' => $this->fields[7] = $this->field(subpathFails: true),
             default => null,
@@ -281,6 +321,33 @@ class FieldMediaTest extends TestCase
         self::assertFalse($this->service->isSelectable(['fieldId' => 7], $asset));
     }
 
+    public static function restrictedLocations(): array
+    {
+        return [
+            'the restricted root' => [true, 11, true],
+            'a subfolder' => [true, 12, true],
+            'a sibling folder' => [true, 13, false],
+            'another volume' => [true, 20, false],
+            'the root only, without subfolders' => [false, 11, true],
+            'a subfolder, without subfolders' => [false, 12, false],
+            'a temporary upload' => [false, 40, true],
+        ];
+    }
+
+    #[DataProvider('restrictedLocations')]
+    public function testRestrictedLocationsAreMeasuredFromTheRestrictedRoot(bool $subfolders, int $folderId, bool $expected): void
+    {
+        $field = $this->field(rootFolderId: 12);
+        $field->restrictLocation = true;
+        $field->restrictedLocationSource = 'volume:videos';
+        $field->restrictedLocationSubpath = 'films';
+        $field->allowSubfolders = $subfolders;
+        // The default upload subfolder isn't the root, and checking creates no folders.
+        $field->expects(self::never())->method('resolveDynamicPathToFolderId');
+
+        self::assertSame($expected, $this->service->isSelectable(['fieldId' => 7], $this->asset(folderId: $folderId)));
+    }
+
     public function testSelectionConditionUsesTheOwnerAsReference(): void
     {
         $owner = $this->owner(8);
@@ -313,6 +380,22 @@ class FieldMediaTest extends TestCase
         }
     }
 
+    public static function checkRefusals(): array
+    {
+        return ['cannot save owner' => ['owner'], 'foreign field' => ['layout'], 'missing folder' => ['folder']];
+    }
+
+    #[DataProvider('checkRefusals')]
+    public function testCheckActionRefusesWithoutRevealingWhy(string $failure): void
+    {
+        $this->field();
+        $this->owner(8, canSave: $failure !== 'owner', inLayout: $failure !== 'layout');
+        $this->assets[42] = $failure === 'folder' ? $this->asset(folderMissing: true) : $this->asset();
+        $this->body = ['fieldId' => 7, 'elementId' => 8, 'assetId' => 42];
+
+        self::assertSame(['selectable' => false], $this->controller()->actionCheck()->data);
+    }
+
     // Protected Methods
     // =========================================================================
 
@@ -331,6 +414,7 @@ class FieldMediaTest extends TestCase
         $field->allowSubfolders = false;
         $field->sources = ['volume:videos'];
         $field->defaultUploadLocationSource = 'volume:videos';
+        $field->allowUploads = true;
 
         if ($field instanceof PolymediaField) {
             $field->allowedProviders = [];
@@ -365,13 +449,18 @@ class FieldMediaTest extends TestCase
     /**
      * Returns a mocked `.pmedia` asset.
      */
-    protected function asset(bool $canView = true, int $folderId = 10): Asset
+    protected function asset(bool $canView = true, int $folderId = 10, bool $folderMissing = false): Asset
     {
         $asset = $this->getMockBuilder(Asset::class)->disableOriginalConstructor()->onlyMethods(['canView', 'getFolder'])->getMock();
         $asset->id = 42;
         $asset->kind = 'polymedia';
         $asset->method('canView')->willReturn($canView);
-        $asset->method('getFolder')->willReturn($this->folders[$folderId]);
+
+        if ($folderMissing) {
+            $asset->method('getFolder')->willThrowException(new \yii\base\InvalidConfigException('Invalid folder ID'));
+        } else {
+            $asset->method('getFolder')->willReturn($this->folders[$folderId]);
+        }
 
         return $asset;
     }

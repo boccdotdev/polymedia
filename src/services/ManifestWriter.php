@@ -41,12 +41,33 @@ class ManifestWriter extends Component
     // =========================================================================
 
     /**
+     * Returns whether a folder is the user's own temporary upload folder.
+     *
+     * Craft uploads there for a new or draft element whose field upload path
+     * can't be resolved yet, and moves the file into place when the element
+     * is saved.
+     *
+     * @param VolumeFolder $folder the folder
+     * @param User $user the user
+     * @return bool
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public static function isTemporaryFolder(VolumeFolder $folder, User $user): bool
+    {
+        return $folder->volumeId === null
+            && (int)$folder->id === (int)Craft::$app->getAssets()->getUserTemporaryUploadFolder($user)->id;
+    }
+
+    /**
      * Resolves a writable library destination for every manifest creation flow.
      *
      * An explicit folder that's missing, not writable or in the sidecar volume
-     * is rejected, never redirected to another volume. Without one, prefer the
-     * configured default, then the first writable ordinary volume. Sidecars
-     * are not a manifest destination.
+     * is rejected, never redirected to another volume. The user's own
+     * temporary upload folder is accepted, as Craft's uploads accept it.
+     * Without a folder, prefer the configured default, then the first
+     * writable ordinary volume. Sidecars are not a manifest destination.
      */
     public function resolveFolder(?int $folderId, ?User $user, Settings $settings): ?VolumeFolder
     {
@@ -68,6 +89,10 @@ class ManifestWriter extends Component
 
         if ($folderId) {
             $folder = $assets->getFolderById($folderId);
+
+            if ($folder && $folder->volumeId === null) {
+                return self::isTemporaryFolder($folder, $user) ? $folder : null;
+            }
 
             if ($folder && $sidecarVolumeId !== null && (int)$folder->volumeId === $sidecarVolumeId) {
                 return null;
@@ -104,7 +129,9 @@ class ManifestWriter extends Component
     /**
      * Creates a new `.pmedia` manifest asset in the given volume folder.
      *
-     * @param int $volumeId the target volume ID
+     * The current user, if any, is recorded as its uploader.
+     *
+     * @param ?int $volumeId the target volume ID, or null for the user's temporary upload folder
      * @param int $folderId the target folder ID
      * @param DetectionResult $detection the detection result
      * @param string $title the user-supplied title
@@ -117,7 +144,7 @@ class ManifestWriter extends Component
      * @since 1.0.0
      */
     public function create(
-        int $volumeId,
+        ?int $volumeId,
         int $folderId,
         DetectionResult $detection,
         string $title,
@@ -144,6 +171,8 @@ class ManifestWriter extends Component
         $asset->filename = $filename;
         $asset->newFolderId = $folderId;
         $asset->volumeId = $volumeId;
+        // Craft lets uploaders view their own assets, temporary ones included.
+        $asset->uploaderId = Craft::$app->getUser()->getId();
         $asset->title = $title;
         $asset->setScenario(Asset::SCENARIO_CREATE);
 

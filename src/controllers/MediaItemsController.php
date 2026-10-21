@@ -164,7 +164,7 @@ class MediaItemsController extends Controller
         $derivedThumbnail = $plugin->getThumbnailDeriver()->derive($detection);
 
         $asset = $plugin->getManifestWriter()->create(
-            volumeId: (int)$folder->volumeId,
+            volumeId: $folder->volumeId,
             folderId: (int)$folder->id,
             detection: $detection,
             title: $title,

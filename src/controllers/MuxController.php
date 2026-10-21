@@ -472,7 +472,7 @@ class MuxController extends Controller
 
         try {
             $asset = $plugin->getManifestWriter()->create(
-                volumeId: (int)$folder->volumeId,
+                volumeId: $folder->volumeId,
                 folderId: (int)$folder->id,
                 detection: $detection,
                 title: $title,
