@@ -83,7 +83,7 @@ class FetchBunnyPosterTest extends TestCase
     public function testFetchesTheThumbnailIntoSidecarStorage(): void
     {
         $this->_posters->expects(self::once())->method('fetchForItem')
-            ->with($this->_record, self::THUMB)->willReturn($this->createMock(Asset::class));
+            ->with($this->_record, self::THUMB, false, null)->willReturn($this->createMock(Asset::class));
         $this->_posters->expects(self::never())->method('queueBunnyPoster');
 
         $this->_job()->execute($this->createMock(\craft\queue\Queue::class));
@@ -92,7 +92,7 @@ class FetchBunnyPosterTest extends TestCase
     public function testRetriesWithTheNextAttempt(): void
     {
         $this->_posters->method('fetchForItem')->willReturn(null);
-        $this->_posters->expects(self::once())->method('queueBunnyPoster')->with($this->_record, 3);
+        $this->_posters->expects(self::once())->method('queueBunnyPoster')->with($this->_record, 3, null);
 
         $this->_job(2)->execute($this->createMock(\craft\queue\Queue::class));
     }
@@ -121,19 +121,60 @@ class FetchBunnyPosterTest extends TestCase
         $this->_job()->execute($this->createMock(\craft\queue\Queue::class));
     }
 
+    public function testRefreshReplacesThePosterItWasQueuedFor(): void
+    {
+        $this->_existingPoster = $this->_poster(5);
+        $this->_posters->expects(self::once())->method('fetchForItem')
+            ->with($this->_record, self::THUMB, true, 5)->willReturn($this->_poster(6));
+
+        $this->_job(replacePosterId: 5)->execute($this->createMock(\craft\queue\Queue::class));
+    }
+
+    public function testRefreshSkipsAPosterThatChangedOrWentAway(): void
+    {
+        $this->_posters->expects(self::never())->method('fetchForItem');
+
+        $this->_existingPoster = $this->_poster(9);
+        $this->_job(replacePosterId: 5)->execute($this->createMock(\craft\queue\Queue::class));
+
+        $this->_existingPoster = null;
+        $this->_job(replacePosterId: 5)->execute($this->createMock(\craft\queue\Queue::class));
+    }
+
+    public function testRefreshRetriesForTheSamePoster(): void
+    {
+        $this->_existingPoster = $this->_poster(5);
+        $this->_posters->method('fetchForItem')->willReturn(null);
+        $this->_posters->expects(self::once())->method('queueBunnyPoster')->with($this->_record, 1, 5);
+
+        $this->_job(replacePosterId: 5)->execute($this->createMock(\craft\queue\Queue::class));
+    }
+
     // Private Methods
     // =========================================================================
 
     /**
      * Returns a job for the fixture item.
      */
-    private function _job(int $attempt = 0): FetchBunnyPoster
+    private function _job(int $attempt = 0, ?int $replacePosterId = null): FetchBunnyPoster
     {
         return new FetchBunnyPoster([
             'itemId' => 7,
             'providerId' => '133:' . self::VIDEO,
             'attempt' => $attempt,
+            'replacePosterId' => $replacePosterId,
         ]);
+    }
+
+    /**
+     * Returns a poster asset with an ID.
+     */
+    private function _poster(int $id): Asset
+    {
+        $poster = $this->createMock(Asset::class);
+        $poster->id = $id;
+
+        return $poster;
     }
 
     /**

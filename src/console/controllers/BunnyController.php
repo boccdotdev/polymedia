@@ -56,6 +56,8 @@ class BunnyController extends Controller
     /**
      * Pulls current state from Bunny Stream for every imported item, or one with --video-id.
      *
+     * Also refreshes posters Polymedia fetched when the thumbnail has changed in Bunny.
+     *
      * @return int
      *
      * @author boccdotdev
@@ -86,7 +88,7 @@ class BunnyController extends Controller
             $label = (string)$record->title !== '' ? (string)$record->title : "#{$record->id}";
 
             try {
-                $fresh = $plugin->getBunnySync()->syncRecord($record);
+                $fresh = $plugin->getBunnySync()->syncRecord($record, checkRemotePoster: true);
             } catch (\Throwable $e) {
                 $failed++;
                 $this->stderr("✗ {$label}: {$e->getMessage()}\n", Console::FG_RED);

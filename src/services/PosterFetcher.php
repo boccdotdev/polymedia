@@ -72,10 +72,16 @@ class PosterFetcher extends Component
      * Returns the existing poster if present, otherwise downloads `$remoteUrl`
      * (or a derived URL) into the managed sidecar folder and attaches it.
      *
+     * A poster this creates is recorded in the item's `posterSource` metadata
+     * (asset ID, source URL and any ETag or Last-Modified), so a later refresh
+     * can tell it apart from a poster an editor chose.
+     *
      * @param MediaItemRecord $record the media item
      * @param ?string $remoteUrl optional remote image URL; derived when null
      * @param bool $force re-download even when a poster already exists
+     * @param ?int $expectedPosterId with `$force`, replace only this poster
      * @return ?Asset the poster asset, or null when none could be resolved
+     * @throws \RuntimeException when the item can't be locked to attach the poster
      *
      * @author boccdotdev
      * @since 2.0.0
@@ -84,11 +90,17 @@ class PosterFetcher extends Component
         MediaItemRecord $record,
         ?string $remoteUrl = null,
         bool $force = false,
+        ?int $expectedPosterId = null,
     ): ?Asset {
         $related = Plugin::getInstance()->getRelatedAssets();
         $existing = $related->getPoster((int)$record->id);
 
         if ($this->shouldSkipAutoFetch($existing, $force)) {
+            return $existing;
+        }
+
+        // A refresh queued for one poster never replaces another.
+        if ($expectedPosterId !== null && (int)$existing?->id !== $expectedPosterId) {
             return $existing;
         }
 
@@ -183,7 +195,12 @@ class PosterFetcher extends Component
 
         // patchMetadata takes the same non-reentrant item lock.
         if ($result['persist']) {
-            $this->_persistThumbnailUrl($record, $remoteUrl);
+            $this->_persistThumbnailUrl($record, $remoteUrl, $result['poster'] ? array_filter([
+                'assetId' => (int)$result['poster']->id,
+                'url' => $remoteUrl,
+                'etag' => $download['etag'] ?? null,
+                'lastModified' => $download['lastModified'] ?? null,
+            ], static fn($value) => $value !== null && $value !== '') : null);
         }
 
         return $result['poster'];
@@ -254,23 +271,81 @@ class PosterFetcher extends Component
 
     /**
      * Queues a poster download for a Bunny item that has a public thumbnail
-     * and no poster yet.
+     * and no poster yet, or a refresh when its thumbnail has changed.
      *
      * The download runs in {@see FetchBunnyPoster}, off the request, and
-     * retries while the CDN catches up.
+     * retries while the CDN catches up. Only a poster Polymedia fetched is
+     * ever refreshed, never one an editor chose.
      *
      * @param MediaItemRecord $record the media item (type bunny)
+     * @param bool $checkRemote also ask the CDN whether the thumbnail at the
+     *                          same URL has changed (one HEAD request)
      *
      * @author boccdotdev
      * @since 2.5.0
      */
-    public function ensureBunnyPoster(MediaItemRecord $record): void
+    public function ensureBunnyPoster(MediaItemRecord $record, bool $checkRemote = false): void
     {
-        if (Plugin::getInstance()->getRelatedAssets()->getPoster((int)$record->id)) {
+        if (!Plugin::getInstance()->getRelatedAssets()->getPoster((int)$record->id)) {
+            $this->queueBunnyPoster($record);
+
             return;
         }
 
-        $this->queueBunnyPoster($record);
+        $stale = $this->staleBunnyPosterId($record, $checkRemote);
+
+        if ($stale !== null) {
+            $this->queueBunnyPoster($record, replacePosterId: $stale);
+        }
+    }
+
+    /**
+     * Returns the ID of a Bunny item's poster when Polymedia fetched it and
+     * Bunny's thumbnail has changed since.
+     *
+     * Bunny sends no webhook for thumbnail changes. A new thumbnail file
+     * changes the URL, which any sync sees. A thumbnail replaced in place
+     * keeps its URL, so `$checkRemote` compares its ETag or Last-Modified.
+     *
+     * @param MediaItemRecord $record the media item (type bunny)
+     * @param bool $checkRemote compare the CDN's validators when the URL is unchanged
+     * @return ?int the poster to replace, or null to keep it
+     *
+     * @author boccdotdev
+     * @since 2.5.1
+     */
+    public function staleBunnyPosterId(MediaItemRecord $record, bool $checkRemote = false): ?int
+    {
+        $plugin = Plugin::getInstance();
+        $poster = $plugin->getRelatedAssets()->getPoster((int)$record->id);
+
+        if (!$poster) {
+            return null;
+        }
+
+        $metadata = $plugin->getMediaItems()->getMetadata($record);
+        $source = $metadata['posterSource'] ?? null;
+
+        // An editor's poster, or one fetched before 2.5.1, has no matching source.
+        if (!is_array($source) || (int)($source['assetId'] ?? 0) !== (int)$poster->id) {
+            return null;
+        }
+
+        $url = Bunny::itemThumbnailUrl($metadata);
+
+        if ($url === null) {
+            return null;
+        }
+
+        if ($url !== ($source['url'] ?? null)) {
+            return (int)$poster->id;
+        }
+
+        if (!$checkRemote) {
+            return null;
+        }
+
+        return $this->_remoteChanged($url, $source) ? (int)$poster->id : null;
     }
 
     /**
@@ -278,16 +353,18 @@ class PosterFetcher extends Component
      *
      * @param MediaItemRecord $record the media item
      * @param int $attempt current attempt (0-based)
+     * @param ?int $replacePosterId the poster a refresh replaces; null for a first fetch
      *
      * @author boccdotdev
      * @since 2.5.0
      */
-    public function queueBunnyPoster(MediaItemRecord $record, int $attempt = 0): void
+    public function queueBunnyPoster(MediaItemRecord $record, int $attempt = 0, ?int $replacePosterId = null): void
     {
         Craft::$app->getQueue()->delay($attempt > 0 ? $this->backoffSeconds($attempt) : 0)->push(new FetchBunnyPoster([
             'itemId' => (int)$record->id,
             'providerId' => (string)$record->providerId,
             'attempt' => $attempt,
+            'replacePosterId' => $replacePosterId,
         ]));
     }
 
@@ -307,7 +384,10 @@ class PosterFetcher extends Component
     }
 
     /**
-     * Derives a remote thumbnail URL for a media item record.
+     * Returns the remote thumbnail URL for a media item record.
+     *
+     * The URL stored in the item's metadata wins, since it's the one fetched
+     * or chosen for this item. Otherwise one is derived from the provider ID.
      *
      * @param MediaItemRecord $record
      * @return ?string
@@ -317,6 +397,13 @@ class PosterFetcher extends Component
      */
     public function deriveRemoteUrl(MediaItemRecord $record): ?string
     {
+        $stored = $this->_decodeMetadata($record)['thumbnail'] ?? null;
+        $stored = is_string($stored) && $stored !== '' ? $stored : null;
+
+        if ($stored !== null && !$this->_isLegacyMuxDefault($record, $stored)) {
+            return $stored;
+        }
+
         $detection = new DetectionResult([
             'type' => (string)$record->type,
             'providerId' => (string)$record->providerId,
@@ -324,17 +411,7 @@ class PosterFetcher extends Component
             'element' => (string)$record->element,
         ]);
 
-        $derived = Plugin::getInstance()->getThumbnailDeriver()->derive($detection);
-
-        if ($derived) {
-            return $derived;
-        }
-
-        $metadata = $this->_decodeMetadata($record);
-
-        return isset($metadata['thumbnail']) && is_string($metadata['thumbnail'])
-            ? $metadata['thumbnail']
-            : null;
+        return Plugin::getInstance()->getThumbnailDeriver()->derive($detection) ?? $stored;
     }
 
     /**
@@ -351,6 +428,23 @@ class PosterFetcher extends Component
      */
     public function probeRemoteStatus(string $url): ?int
     {
+        return $this->probeRemote($url)['status'] ?? null;
+    }
+
+    /**
+     * HEAD/GET probe of a remote image URL, with its cache validators.
+     *
+     * Redirects aren't followed, so a poster URL can't bounce the server to
+     * another host.
+     *
+     * @param string $url
+     * @return ?array{status: int, etag: ?string, lastModified: ?string} null on network error
+     *
+     * @author boccdotdev
+     * @since 2.5.1
+     */
+    public function probeRemote(string $url): ?array
+    {
         try {
             $client = Craft::createGuzzleClient(['timeout' => 10, 'http_errors' => false, 'allow_redirects' => false]);
             $response = $client->head($url);
@@ -365,7 +459,11 @@ class PosterFetcher extends Component
                 $status = $response->getStatusCode();
             }
 
-            return $status;
+            return [
+                'status' => $status,
+                'etag' => $response->getHeaderLine('ETag') ?: null,
+                'lastModified' => $response->getHeaderLine('Last-Modified') ?: null,
+            ];
         } catch (\Throwable $e) {
             Craft::warning("PosterFetcher probe failed for {$url}: {$e->getMessage()}", __METHOD__);
 
@@ -377,7 +475,7 @@ class PosterFetcher extends Component
      * Downloads a remote image to a temp file. Redirects aren't followed.
      *
      * @param string $url
-     * @return ?array{path: string, extension: string} null when not HTTP 200
+     * @return ?array{path: string, extension: string, etag: ?string, lastModified: ?string} null when not HTTP 200
      *
      * @author boccdotdev
      * @since 2.0.0
@@ -406,6 +504,8 @@ class PosterFetcher extends Component
             return [
                 'path' => $path,
                 'extension' => $extension,
+                'etag' => $response->getHeaderLine('ETag') ?: null,
+                'lastModified' => $response->getHeaderLine('Last-Modified') ?: null,
             ];
         } catch (\Throwable $e) {
             Craft::warning("PosterFetcher download failed for {$url}: {$e->getMessage()}", __METHOD__);
@@ -524,6 +624,49 @@ class PosterFetcher extends Component
         }
     }
 
+    /**
+     * Whether the image at a URL has changed since a poster was fetched from it.
+     *
+     * Unknown counts as unchanged: no validators stored or returned, or the
+     * probe failed.
+     *
+     * @param string $url the thumbnail URL
+     * @param array $source the poster's recorded source
+     * @return bool
+     */
+    private function _remoteChanged(string $url, array $source): bool
+    {
+        $probe = $this->probeRemote($url);
+
+        if (!$probe || !in_array($probe['status'], [200, 206], true)) {
+            return false;
+        }
+
+        foreach (['etag', 'lastModified'] as $validator) {
+            $stored = $source[$validator] ?? null;
+
+            if (is_string($stored) && $stored !== '' && $probe[$validator] !== null) {
+                return $probe[$validator] !== $stored;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether a stored thumbnail is the first-frame Mux URL that items
+     * imported before 2.5.0 stored by default, rather than one chosen for them.
+     *
+     * @param MediaItemRecord $record
+     * @param string $url the stored thumbnail URL
+     * @return bool
+     */
+    private function _isLegacyMuxDefault(MediaItemRecord $record, string $url): bool
+    {
+        return $record->type === 'mux'
+            && $url === "https://image.mux.com/{$record->providerId}/thumbnail.jpg?time=0";
+    }
+
     private function _extensionFromContentType(string $contentType): ?string
     {
         $contentType = strtolower(trim(explode(';', $contentType)[0]));
@@ -560,12 +703,14 @@ class PosterFetcher extends Component
      *
      * @param MediaItemRecord $record
      * @param string $thumbnailUrl
+     * @param ?array $posterSource the poster just fetched from it, if any
      */
-    private function _persistThumbnailUrl(MediaItemRecord $record, string $thumbnailUrl): void
+    private function _persistThumbnailUrl(MediaItemRecord $record, string $thumbnailUrl, ?array $posterSource = null): void
     {
-        $metadata = Plugin::getInstance()->getMediaItems()->patchMetadata($record, [
+        $metadata = Plugin::getInstance()->getMediaItems()->patchMetadata($record, array_filter([
             'thumbnail' => $thumbnailUrl,
-        ]);
+            'posterSource' => $posterSource,
+        ], static fn($value) => $value !== null));
 
         if ($metadata === null) {
             return;

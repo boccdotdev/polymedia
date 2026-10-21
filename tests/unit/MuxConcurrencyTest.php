@@ -35,6 +35,7 @@ class MuxConcurrencyTest extends TestCase
     private int $created = 0;
     private bool $attachmentFails = false;
     private bool $hasStorage = true;
+    private array $patches = [];
     private Plugin $plugin;
     private \craft\services\Elements $elements;
 
@@ -92,8 +93,9 @@ class MuxConcurrencyTest extends TestCase
             }
             return $this->saveSucceeds;
         });
-        $this->items->method('patchMetadata')->willReturnCallback(function(): ?array {
+        $this->items->method('patchMetadata')->willReturnCallback(function(MediaItemRecord $record, array $patch): ?array {
             self::assertFalse($this->locked);
+            $this->patches[] = $patch;
             return null;
         });
         $this->related = $this->getMockBuilder(RelatedAssets::class)
@@ -252,6 +254,31 @@ class MuxConcurrencyTest extends TestCase
         self::assertSame(1, $this->created);
     }
 
+    public function testFetchRecordsWhereThePosterCameFrom(): void
+    {
+        $this->allowFolder();
+        $fetcher = $this->fetcher(validators: ['etag' => '"v1"', 'lastModified' => null]);
+
+        self::assertSame(101, $fetcher->fetchForItem($this->record, 'https://example.test/poster')?->id);
+        self::assertSame([[
+            'thumbnail' => 'https://example.test/poster',
+            'posterSource' => ['assetId' => 101, 'url' => 'https://example.test/poster', 'etag' => '"v1"'],
+        ]], $this->patches);
+    }
+
+    public function testRefreshReplacesOnlyThePosterItWasQueuedFor(): void
+    {
+        $this->poster = $this->asset(88);
+        $fetcher = $this->getMockBuilder(PosterFetcher::class)->onlyMethods(['downloadToTemp'])->getMock();
+        $fetcher->expects(self::never())->method('downloadToTemp');
+
+        self::assertSame(88, $fetcher->fetchForItem($this->record, 'https://example.test/poster', true, 90)?->id);
+
+        $this->allowFolder();
+        self::assertSame(101, $this->fetcher()->fetchForItem($this->record, 'https://example.test/poster', true, 88)?->id);
+        self::assertSame(1, $this->created);
+    }
+
     public function testForceDeletesReplacedPosterFromItemFolder(): void
     {
         $this->poster = $this->asset(88, folderId: 3);
@@ -399,14 +426,14 @@ class MuxConcurrencyTest extends TestCase
         });
     }
 
-    private function fetcher(?callable $duringDownload = null): PosterFetcher
+    private function fetcher(?callable $duringDownload = null, array $validators = []): PosterFetcher
     {
         $fetcher = $this->getMockBuilder(PosterFetcher::class)
             ->onlyMethods(['downloadToTemp', '_createPosterAsset'])->getMock();
-        $fetcher->method('downloadToTemp')->willReturnCallback(function() use ($duringDownload): array {
+        $fetcher->method('downloadToTemp')->willReturnCallback(function() use ($duringDownload, $validators): array {
             self::assertFalse($this->locked, 'Do not hold item locks during HTTP.');
             $duringDownload?->__invoke();
-            return ['path' => '/nonexistent/polymedia-unit-test', 'extension' => 'jpg'];
+            return ['path' => '/nonexistent/polymedia-unit-test', 'extension' => 'jpg'] + $validators;
         });
         $fetcher->method('_createPosterAsset')->willReturnCallback(function(): Asset {
             self::assertTrue($this->locked);

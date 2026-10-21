@@ -297,6 +297,37 @@ class Bunny extends Component
     }
 
     /**
+     * Returns an item's stored Bunny thumbnail URL when it points at the
+     * item's own video on its pinned host.
+     *
+     * @param array $metadata the media item metadata
+     * @return ?string null when there is none, or it points anywhere else
+     *
+     * @author boccdotdev
+     * @since 2.5.1
+     */
+    public static function itemThumbnailUrl(array $metadata): ?string
+    {
+        $url = (string)($metadata['bunnyThumbnailUrl'] ?? '');
+
+        if ($url === '') {
+            return null;
+        }
+
+        try {
+            $expected = self::thumbnailUrl(
+                (string)($metadata['bunnyCdnHostname'] ?? ''),
+                (string)($metadata['bunnyVideoId'] ?? ''),
+                basename((string)parse_url($url, PHP_URL_PATH)),
+            );
+        } catch (\InvalidArgumentException) {
+            return null;
+        }
+
+        return $expected === $url ? $url : null;
+    }
+
+    /**
      * Maps a Stream API video status (`VideoModelStatus`) to a Polymedia status.
      *
      * Webhook notification codes are a different enum and must never be

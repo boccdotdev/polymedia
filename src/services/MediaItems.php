@@ -611,6 +611,8 @@ class MediaItems extends Component
      *                              was fetched; a newer stored version means a
      *                              concurrent sync won, so this stale state is
      *                              rejected
+     * @param bool $checkRemotePoster also ask the CDN whether a thumbnail
+     *                                replaced in place has changed
      * @return ?MediaItemRecord the updated record, or `null` when it no longer exists
      * @throws \RuntimeException when the item is busy, a newer sync won, the
      *                           state targets another video, or saving fails
@@ -618,8 +620,12 @@ class MediaItems extends Component
      * @author boccdotdev
      * @since 2.5.0
      */
-    public function applyBunnyVideoState(MediaItemRecord $record, array $state, ?int $expectedVersion = null): ?MediaItemRecord
-    {
+    public function applyBunnyVideoState(
+        MediaItemRecord $record,
+        array $state,
+        ?int $expectedVersion = null,
+        bool $checkRemotePoster = false,
+    ): ?MediaItemRecord {
         $applied = $this->withItemLock($record, function() use ($record, $state, $expectedVersion): bool {
             $fresh = $this->getById((int)$record->id);
 
@@ -678,7 +684,7 @@ class MediaItems extends Component
 
         // Outside the lock: the poster job re-checks under its own lock.
         if (!empty($state['thumbnailUrl']) && ($state['playbackPolicy'] ?? null) === 'public') {
-            Plugin::getInstance()->getPosterFetcher()->ensureBunnyPoster($record);
+            Plugin::getInstance()->getPosterFetcher()->ensureBunnyPoster($record, $checkRemotePoster);
         }
 
         return $record;
@@ -717,8 +723,11 @@ class MediaItems extends Component
             $merged['mp4Renditions'] = $state['mp4Renditions'];
         }
 
-        // A late thumbnail is kept as the remote poster, never over an editor's.
-        if (empty($merged['thumbnail']) && !empty($state['thumbnailUrl'])) {
+        // A late thumbnail is kept as the remote poster, and follows Bunny's
+        // while it's still Bunny's, never over an editor's.
+        if (!empty($state['thumbnailUrl'])
+            && (empty($merged['thumbnail']) || $merged['thumbnail'] === ($metadata['bunnyThumbnailUrl'] ?? null))
+        ) {
             $merged['thumbnail'] = $state['thumbnailUrl'];
         }
 

@@ -247,6 +247,22 @@ class BunnySyncTest extends TestCase
         self::assertSame($this->_state['thumbnailUrl'], json_decode($this->_record->metadata, true)['bunnyThumbnailUrl']);
     }
 
+    public function testOnlyTheConsoleSyncAsksTheCdnAboutPosters(): void
+    {
+        $this->_state['thumbnailUrl'] = 'https://vz-old.b-cdn.net/' . self::VIDEO . '/thumbnail.jpg';
+        $checks = [];
+        $this->_plugin->posters->method('ensureBunnyPoster')
+            ->willReturnCallback(function(MediaItemRecord $record, bool $checkRemote = false) use (&$checks): void {
+                $checks[] = $checkRemote;
+            });
+
+        (new BunnySync())->syncRecord($this->_record);
+        (new BunnySync())->syncRecord($this->_record, checkRemotePoster: true);
+        (new BunnySync())->syncVideo('133', self::VIDEO);
+
+        self::assertSame([false, true, false], $checks);
+    }
+
     public function testImportReusesAVisibleExistingItem(): void
     {
         $this->_asset = $this->_assetMock(true);

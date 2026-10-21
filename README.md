@@ -128,6 +128,8 @@ php craft polymedia/bunny/sync
 php craft polymedia/bunny/sync --video-id=<guid>
 ```
 
+Bunny sends no webhook when a video's thumbnail changes. Imports, webhooks and syncs notice a new thumbnail file, and `polymedia/bunny/sync` also checks the thumbnail's ETag or Last-Modified, so it notices a thumbnail replaced at the same URL too. Polymedia then replaces the poster it fetched. A poster an editor chose is never replaced. Posters fetched before 2.5.1 aren't tracked, so remove one from its asset and sync to fetch it again.
+
 **Webhooks (optional):** put the library's **read-only API key** in your environment and select its reference under **Bunny Webhook Verification Key**. Then copy the **Bunny Webhook URL** shown in the settings (`https://your-site/actions/polymedia/webhooks/bunny`) into the library's webhook setting. Polymedia verifies Bunny's signature over the raw request body, refreshes only videos that are already imported, and ignores the status code in the payload (it re-reads the video from the API). Unknown videos are acknowledged and ignored; temporary failures answer `503` so Bunny retries. The endpoint is off while the key is empty.
 
 **Remote deletion (optional):** **Delete Bunny video when Craft asset is deleted** is off by default. When on, permanently deleting a Bunny `.pmedia` also deletes the video, but only with Pro and credentials for the library the video came from. Trashing an asset never deletes the video. Craft's automatic trash purging (after `softDeleteDuration`) skips element events, so it never deletes remote videos; only deleting from the Trash, or a direct hard delete, does.
@@ -648,7 +650,7 @@ When creating media **without** a user-selected poster:
 4. If the Mux image is not ready yet, a queue job retries with backoff.
 5. Last resort: remote thumbnail URL only in manifest metadata (CP may show it until a local poster exists).
 
-CP asset index / picker thumbs for `.pmedia` files use the related poster when present, at the poster's own aspect ratio, else the remote thumbnail URL.
+CP asset index / picker thumbs for `.pmedia` files use the related poster when present, at the poster's own aspect ratio. Otherwise they use the thumbnail URL stored on the item, or one derived from the provider when none is stored.
 
 ## Accessibility
 

@@ -24,6 +24,9 @@ use craft\queue\BaseJob;
  * is fetched. {@see \boccdotdev\polymedia\services\PosterFetcher::fetchForItem()}
  * re-checks the current poster under the item lock.
  *
+ * With `replacePosterId`, the job refreshes a poster Polymedia fetched
+ * earlier, and only while that poster is still the item's poster.
+ *
  * @author boccdotdev
  * @since 2.5.0
  */
@@ -52,6 +55,12 @@ class FetchBunnyPoster extends BaseJob
      */
     public int $maxAttempts = 8;
 
+    /**
+     * @var ?int The poster to replace; null fetches only when the item has no poster
+     * @since 2.5.1
+     */
+    public ?int $replacePosterId = null;
+
     // Public Methods
     // =========================================================================
 
@@ -66,8 +75,14 @@ class FetchBunnyPoster extends BaseJob
         if (!$record
             || $record->type !== 'bunny'
             || (string)$record->providerId !== $this->providerId
-            || $plugin->getRelatedAssets()->getPoster((int)$record->id)
         ) {
+            return;
+        }
+
+        $poster = $plugin->getRelatedAssets()->getPoster((int)$record->id);
+
+        // A first fetch needs no poster; a refresh needs the one it was queued for.
+        if ($this->replacePosterId === null ? $poster !== null : (int)$poster?->id !== $this->replacePosterId) {
             return;
         }
 
@@ -76,7 +91,7 @@ class FetchBunnyPoster extends BaseJob
             return;
         }
 
-        $url = $this->_thumbnailUrl($plugin->getMediaItems()->getMetadata($record));
+        $url = Bunny::itemThumbnailUrl($plugin->getMediaItems()->getMetadata($record));
 
         if ($url === null) {
             return;
@@ -85,7 +100,12 @@ class FetchBunnyPoster extends BaseJob
         $this->setProgress($queue, 0.2);
 
         try {
-            $poster = $plugin->getPosterFetcher()->fetchForItem($record, $url);
+            $poster = $plugin->getPosterFetcher()->fetchForItem(
+                $record,
+                $url,
+                force: $this->replacePosterId !== null,
+                expectedPosterId: $this->replacePosterId,
+            );
         } catch (\Throwable $e) {
             Craft::warning("FetchBunnyPoster failed for item #{$this->itemId}: {$e->getMessage()}", __METHOD__);
             $poster = null;
@@ -103,7 +123,7 @@ class FetchBunnyPoster extends BaseJob
             return;
         }
 
-        $plugin->getPosterFetcher()->queueBunnyPoster($record, $this->attempt + 1);
+        $plugin->getPosterFetcher()->queueBunnyPoster($record, $this->attempt + 1, $this->replacePosterId);
         $this->setProgress($queue, 1.0);
     }
 
@@ -115,36 +135,8 @@ class FetchBunnyPoster extends BaseJob
      */
     protected function defaultDescription(): ?string
     {
-        return Craft::t('polymedia', 'Fetching Bunny Stream poster');
-    }
-
-    // Private Methods
-    // =========================================================================
-
-    /**
-     * Returns the stored thumbnail URL when it matches the item's own video.
-     *
-     * @param array $metadata the item metadata
-     * @return ?string
-     */
-    private function _thumbnailUrl(array $metadata): ?string
-    {
-        $url = (string)($metadata['bunnyThumbnailUrl'] ?? '');
-
-        if ($url === '') {
-            return null;
-        }
-
-        try {
-            $expected = Bunny::thumbnailUrl(
-                (string)($metadata['bunnyCdnHostname'] ?? ''),
-                (string)($metadata['bunnyVideoId'] ?? ''),
-                basename((string)parse_url($url, PHP_URL_PATH)),
-            );
-        } catch (\InvalidArgumentException) {
-            return null;
-        }
-
-        return $expected === $url ? $url : null;
+        return $this->replacePosterId !== null
+            ? Craft::t('polymedia', 'Refreshing Bunny Stream poster')
+            : Craft::t('polymedia', 'Fetching Bunny Stream poster');
     }
 }
