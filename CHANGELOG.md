@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.6.0 - Unreleased
+## 2.6.0 - 2026-10-21
 
 ### Added
 - `polymedia/migrate/prune-folders` lists the empty legacy folders that `polymedia/migrate/sidecars` leaves behind, and deletes them with `--apply`. A legacy folder is named after a `.pmedia` beside it plus 8 letters or digits, or sits inside one with a name that ends the same way. It's deleted only when it holds no assets, trashed or not, no other folders and no files on disk that Craft never indexed. Nested folders go deepest first, and every folder that stays is listed with the reason. ([#23](https://github.com/boccdotdev/polymedia/issues/23))
