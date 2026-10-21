@@ -27,6 +27,7 @@ use boccdotdev\polymedia\services\AssetFieldSettings;
 use boccdotdev\polymedia\services\Bunny;
 use boccdotdev\polymedia\services\BunnySync;
 use boccdotdev\polymedia\services\EditorContent;
+use boccdotdev\polymedia\services\FieldMedia;
 use boccdotdev\polymedia\services\ManifestWriter;
 use boccdotdev\polymedia\services\MediaItems;
 use boccdotdev\polymedia\services\Mux;
@@ -51,6 +52,7 @@ use craft\events\DefineAssetThumbUrlEvent;
 use craft\events\DefineAttributeHtmlEvent;
 use craft\events\DefineBehaviorsEvent;
 use craft\events\DefineElementEditorHtmlEvent;
+use craft\events\DefineFieldHtmlEvent;
 use craft\events\DefineGqlTypeFieldsEvent;
 use craft\events\FieldEvent;
 use craft\events\ModelEvent;
@@ -96,6 +98,7 @@ use yii\base\Event;
  * @property-read Bunny $bunny
  * @property-read BunnySync $bunnySync
  * @property-read VideoUploads $videoUploads
+ * @property-read FieldMedia $fieldMedia
  * @property-read SourceAssets $sourceAssets
  * @property-read PosterFetcher $posterFetcher
  * @property-read SidecarStorage $sidecarStorage
@@ -177,6 +180,7 @@ class Plugin extends BasePlugin
             'bunny' => Bunny::class,
             'bunnySync' => BunnySync::class,
             'videoUploads' => VideoUploads::class,
+            'fieldMedia' => FieldMedia::class,
             'sourceAssets' => SourceAssets::class,
             'posterFetcher' => PosterFetcher::class,
             'sidecarStorage' => SidecarStorage::class,
@@ -196,6 +200,7 @@ class Plugin extends BasePlugin
         $this->_registerAssetFieldSettingsUi();
         $this->_registerAssetFieldPersistence();
         $this->_registerAssetFieldValidation();
+        $this->_registerFieldMediaMenu();
         $this->_registerTwigVariable();
         $this->_registerCpAssets();
         $this->_registerGql();
@@ -450,6 +455,19 @@ class Plugin extends BasePlugin
     public function getVideoUploads(): VideoUploads
     {
         return $this->get('videoUploads');
+    }
+
+    /**
+     * Returns the field media destination service.
+     *
+     * @return FieldMedia
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function getFieldMedia(): FieldMedia
+    {
+        return $this->get('fieldMedia');
     }
 
     /**
@@ -872,7 +890,7 @@ class Plugin extends BasePlugin
      * Reconciles orphaned `.pmedia` assets that have no `MediaItemRecord` row.
      *
      * Covers assets created by the asset indexer or manual file upload outside
-     * the plugin's “Add media → From URL” flow.
+     * the plugin's “Add video or audio → From URL” flow.
      */
     private function _registerAssetReconciler(): void
     {
@@ -1288,7 +1306,7 @@ class Plugin extends BasePlugin
 
                 $view->registerAssetBundle(PolymediaAsset::class);
                 $view->registerTranslations('polymedia', [
-                    'Add media',
+                    'Add video or audio',
                     'From URL',
                     'Paste a YouTube, Vimeo, HLS, or other media URL',
                     'Browse video library',
@@ -1300,7 +1318,6 @@ class Plugin extends BasePlugin
                     'From existing asset',
                     'Use a video asset without changing the original file',
                     'Could not create media item.',
-                    'Add media URL',
                     'Media item created.',
                     'Import',
                     'In Craft',
@@ -1576,6 +1593,35 @@ class Plugin extends BasePlugin
     });
 })();
 JS);
+            },
+        );
+    }
+
+    /**
+     * Renders the Add video or audio menu config beside the inputs of Assets
+     * fields that explicitly allow the Polymedia kind, for the CP script to
+     * pick up when the input initializes.
+     */
+    private function _registerFieldMediaMenu(): void
+    {
+        if (!Craft::$app->getRequest()->getIsCpRequest()) {
+            return;
+        }
+
+        Event::on(
+            AssetsField::class,
+            AssetsField::EVENT_DEFINE_INPUT_HTML,
+            function(DefineFieldHtmlEvent $event) {
+                /** @var AssetsField $field */
+                $field = $event->sender;
+                $menu = $this->getFieldMedia()->getMenu($field);
+
+                if ($menu !== null) {
+                    $event->html .= Html::tag('div', '', [
+                        'class' => 'hidden',
+                        'data' => ['polymedia-field-media' => $menu],
+                    ]);
+                }
             },
         );
     }

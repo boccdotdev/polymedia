@@ -12,6 +12,7 @@ use boccdotdev\polymedia\controllers\VideoUploadsController;
 use boccdotdev\polymedia\fields\PolymediaField;
 use boccdotdev\polymedia\models\Settings;
 use boccdotdev\polymedia\Plugin;
+use boccdotdev\polymedia\services\FieldMedia;
 use boccdotdev\polymedia\services\ManifestWriter;
 use boccdotdev\polymedia\services\Mux;
 use boccdotdev\polymedia\services\VideoUploads;
@@ -66,13 +67,14 @@ class VideoUploadsTest extends TestCase
         $this->uploads = new VideoUploads();
 
         $plugin = $this->getMockBuilder(Plugin::class)->disableOriginalConstructor()
-            ->onlyMethods(['getSettings', 'getIsPro', 'getMux', 'getManifestWriter', 'getVideoUploads'])->getMock();
+            ->onlyMethods(['getSettings', 'getIsPro', 'getMux', 'getManifestWriter', 'getVideoUploads', 'getFieldMedia'])->getMock();
         $plugin->method('getSettings')->willReturn($this->settings);
         $plugin->method('getIsPro')->willReturnCallback(fn() => $this->pro);
         $mux = $this->createMock(Mux::class);
         $mux->method('isConfigured')->willReturnCallback(fn() => $this->configured);
         $plugin->method('getMux')->willReturn($mux);
         $plugin->method('getVideoUploads')->willReturn($this->uploads);
+        $plugin->method('getFieldMedia')->willReturn(new FieldMedia());
         $writer = $this->createMock(ManifestWriter::class);
         // Explicit invalid destinations must never resolve a fallback.
         $writer->expects(self::never())->method('resolveFolder');

@@ -15,6 +15,7 @@ use boccdotdev\polymedia\Plugin;
 use boccdotdev\polymedia\records\MediaItemRecord;
 use Craft;
 use craft\elements\Asset;
+use craft\fields\Assets as AssetsField;
 use craft\web\Controller;
 use yii\web\Response;
 
@@ -42,9 +43,12 @@ class MediaItemsController extends Controller
     // =========================================================================
 
     /**
-     * Returns the "From URL" / add-media slideout screen.
+     * Returns the "From URL" slideout screen.
+     *
+     * With a `fieldId`, only the field's allowed provider types are offered.
      *
      * @return Response
+     * @throws \yii\web\ForbiddenHttpException when there's no writable library volume
      *
      * @author boccdotdev
      * @since 1.0.0
@@ -56,6 +60,12 @@ class MediaItemsController extends Controller
         $plugin = Plugin::getInstance();
         $settings = $plugin->getSettings();
         $providerTypes = $plugin->getUrlDetector()->getProviderTypes();
+        $fieldId = (int)Craft::$app->getRequest()->getParam('fieldId') ?: null;
+        $allowed = $this->_allowedProviders($fieldId);
+
+        if ($allowed !== []) {
+            $providerTypes = array_values(array_intersect($providerTypes, $allowed));
+        }
 
         $currentUser = Craft::$app->getUser()->getIdentity();
         $folderId = (int)Craft::$app->getRequest()->getParam('folderId') ?: null;
@@ -75,6 +85,7 @@ class MediaItemsController extends Controller
             ->contentTemplate('polymedia/_cp/create-screen', [
                 'providerTypes' => $providerTypes,
                 'folderId' => $folder->id ?? '',
+                'fieldId' => $fieldId ?? '',
                 'warnOnSignedUrl' => $settings->warnOnSignedUrlInPublicVolume,
                 'posterFieldConfig' => $plugin->getPosterFieldConfig($posterUploadFolder),
             ])
@@ -84,6 +95,9 @@ class MediaItemsController extends Controller
 
     /**
      * Creates a new `.pmedia` manifest asset from the submitted form.
+     *
+     * With a `fieldId`, a URL whose provider the field doesn't allow is
+     * refused before anything is created.
      *
      * @return ?Response
      * @throws \Throwable if the asset cannot be saved
@@ -104,6 +118,7 @@ class MediaItemsController extends Controller
         $title = trim($request->getRequiredBodyParam('title'));
         $typeOverride = $request->getBodyParam('typeOverride') ?: null;
         $folderId = (int)$request->getBodyParam('folderId') ?: null;
+        $allowed = $this->_allowedProviders((int)$request->getBodyParam('fieldId') ?: null);
         $confirmedSignedUrlWarning = (bool)$request->getBodyParam('confirmedSignedUrlWarning', false);
 
         if ($url === '' || $title === '') {
@@ -126,6 +141,12 @@ class MediaItemsController extends Controller
 
         if (!$detection) {
             return $this->asFailure(Craft::t('polymedia', 'Could not detect media type from this URL.'));
+        }
+
+        if ($allowed !== [] && !in_array($detection->type, $allowed, true)) {
+            return $this->asFailure(Craft::t('polymedia', 'This field doesn’t allow {type} media.', [
+                'type' => ucfirst($detection->type),
+            ]));
         }
 
         if (
@@ -177,6 +198,24 @@ class MediaItemsController extends Controller
 
     // Private Methods
     // =========================================================================
+
+    /**
+     * Returns the provider types a field allows. Empty means all, including
+     * when there's no Assets field to restrict them.
+     *
+     * The field only narrows what's offered. It authorizes nothing.
+     *
+     * @param ?int $fieldId the field the media is for
+     * @return string[]
+     */
+    private function _allowedProviders(?int $fieldId): array
+    {
+        $field = $fieldId !== null ? Craft::$app->getFields()->getFieldById($fieldId) : null;
+
+        return $field instanceof AssetsField
+            ? Plugin::getInstance()->getFieldMedia()->getAllowedProviders($field)
+            : [];
+    }
 
     /**
      * Moves a poster uploaded on the create screen into its managed sidecar folder.

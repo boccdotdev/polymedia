@@ -17,8 +17,8 @@ use craft\web\assets\cp\CpAsset;
 /**
  * CP asset bundle for Polymedia.
  *
- * Bundles the JS and CSS for the Assets “Add media” disclosure and video modals
- * and modal on the asset element index.
+ * Bundles the JS and CSS for the “Add video or audio” disclosure on the Assets
+ * index, asset pickers and fields, and its video modals.
  *
  * @author boccdotdev
  * @since 1.0.0
