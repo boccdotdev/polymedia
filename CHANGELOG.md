@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.4.0 - 2026-10-21
+
+### Added
+- Optional Video.js v10 player engine. A new **Player Engine** setting (env-var capable, so one environment can try it first) switches `player()`, `element()` and `scripts()` site-wide from Media Chrome to Video.js. Players use a packaged skin (**Video.js Skin** setting or a `skin` option), reserve their box with the stored aspect ratio (`aspectRatio` option to override), translate to the site language, and accept your own controls through `children`. `craft.polymedia.playerEngine` reports the active engine. Examples in `examples/videojs/` show a brand theme and a Media Chrome look-alike that keeps a site's Media Chrome styling. Scripts load from `@videojs/cdn` pinned to the **Video.js Version** setting. Media Chrome stays the default, and its markup is unchanged. ([#3](https://github.com/boccdotdev/polymedia/issues/3))
+
 ## 2.3.0 - 2026-10-17
 
 ### Added

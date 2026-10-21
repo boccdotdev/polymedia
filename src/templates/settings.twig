@@ -41,11 +41,50 @@
 
 <hr>
 
+<h2>{{ 'Player'|t('polymedia') }}</h2>
+
+{# An autosuggest, not a select: a select can't show an env var that's unset in this environment, and saving would overwrite it. #}
+{{ forms.autosuggestField({
+    label: 'Player Engine'|t('polymedia'),
+    instructions: "`media-chrome` or `videojs`. Media Chrome and Video.js can't load on the same page, so this applies to the whole site. Use an environment variable, such as `$POLYMEDIA_PLAYER_ENGINE`, to try Video.js in one environment first."|t('polymedia'),
+    tip: 'Video.js needs Chrome 111, Firefox 113, Safari 16.2 or newer.'|t('polymedia'),
+    id: 'playerEngine',
+    name: 'playerEngine',
+    value: settings.playerEngine,
+    suggestions: [{
+        label: 'Engines'|t('polymedia'),
+        data: [
+            { name: 'media-chrome', hint: 'Media Chrome'|t('polymedia') },
+            { name: 'videojs', hint: 'Video.js'|t('polymedia') },
+        ],
+    }],
+    suggestEnvVars: true,
+    errors: settings.getErrors('playerEngine'),
+    disabled: not allowAdminChanges,
+}) }}
+
+{{ forms.selectField({
+    label: 'Video.js Skin'|t('polymedia'),
+    instructions: 'The packaged skin Video.js players use. Templates can pick another per player with the `skin` option.'|t('polymedia'),
+    id: 'videojsSkin',
+    name: 'videojsSkin',
+    value: settings.videojsSkin,
+    options: [
+        { label: 'Default'|t('polymedia'), value: 'default' },
+        { label: 'Neutral'|t('polymedia'), value: 'neutral' },
+        { label: 'Compat'|t('polymedia'), value: 'compat' },
+    ],
+    errors: settings.getErrors('videojsSkin'),
+    disabled: not allowAdminChanges,
+}) }}
+
+<hr>
+
 <h2>{{ 'Scripts'|t('polymedia') }}</h2>
 
 {{ forms.selectField({
     label: 'Script Loader Mode'|t('polymedia'),
-    instructions: 'How front-end Media Chrome scripts are loaded.'|t('polymedia'),
+    instructions: 'How front-end player scripts are loaded.'|t('polymedia'),
     id: 'scriptLoaderMode',
     name: 'scriptLoaderMode',
     value: settings.scriptLoaderMode,
@@ -92,6 +131,17 @@
     disabled: not allowAdminChanges,
 }) }}
 
+{{ forms.textField({
+    label: 'Video.js Version'|t('polymedia'),
+    instructions: 'Exact Video.js version for the `scripts()` Twig helper when the player engine is Video.js, e.g. `10.1.0`.'|t('polymedia'),
+    id: 'videojsVersion',
+    name: 'videojsVersion',
+    value: settings.videojsVersion,
+    size: 10,
+    errors: settings.getErrors('videojsVersion'),
+    disabled: not allowAdminChanges,
+}) }}
+
 {{ forms.checkboxGroupField({
     label: 'Default Providers'|t('polymedia'),
     instructions: 'Providers included when `scripts()` is called without arguments.'|t('polymedia'),
@@ -112,7 +162,7 @@
         { label: 'Twitch', value: 'twitch' },
         { label: 'Cloudflare', value: 'cloudflare' },
         { label: 'PeerTube', value: 'peertube' },
-        { label: 'Video.js', value: 'videojs' },
+        { label: 'Video.js (v8 embed)'|t('polymedia'), value: 'videojs' },
     ],
     disabled: not allowAdminChanges,
 }) }}

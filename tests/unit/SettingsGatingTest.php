@@ -79,6 +79,86 @@ class SettingsGatingTest extends TestCase
         ]));
     }
 
+    public function testPlayerEngineDefaultsToMediaChromeAndResolvesEnvVars(): void
+    {
+        $this->assertSame(Settings::ENGINE_MEDIA_CHROME, (new Settings())->getPlayerEngine());
+        $this->assertSame('10.1.0', (new Settings())->videojsVersion);
+
+        $_SERVER['POLYMEDIA_TEST_ENGINE'] = 'videojs';
+        $_SERVER['POLYMEDIA_TEST_TYPO'] = 'video.js';
+
+        try {
+            $this->assertSame(Settings::ENGINE_VIDEOJS, (new Settings(['playerEngine' => 'videojs']))->getPlayerEngine());
+            $this->assertSame(Settings::ENGINE_VIDEOJS, (new Settings(['playerEngine' => '$POLYMEDIA_TEST_ENGINE']))->getPlayerEngine());
+            // Unknown values never break rendering.
+            $this->assertSame(Settings::ENGINE_MEDIA_CHROME, (new Settings(['playerEngine' => '$POLYMEDIA_TEST_TYPO']))->getPlayerEngine());
+            $this->assertSame(Settings::ENGINE_MEDIA_CHROME, (new Settings(['playerEngine' => '$POLYMEDIA_TEST_UNSET']))->getPlayerEngine());
+        } finally {
+            unset($_SERVER['POLYMEDIA_TEST_ENGINE'], $_SERVER['POLYMEDIA_TEST_TYPO']);
+        }
+    }
+
+    /**
+     * @dataProvider playerEngineValues
+     */
+    public function testPlayerEngineValidation(string $engine, bool $valid): void
+    {
+        if (\Yii::$app === null) {
+            new \yii\console\Application([
+                'id' => 'polymedia-tests',
+                'basePath' => dirname(__DIR__, 2),
+            ]);
+        }
+
+        $_SERVER['POLYMEDIA_TEST_ENGINE'] = 'videojs';
+        $_SERVER['POLYMEDIA_TEST_TYPO'] = 'video.js';
+
+        try {
+            $this->assertSame($valid, (new Settings(['playerEngine' => $engine]))->validate(['playerEngine']));
+        } finally {
+            unset($_SERVER['POLYMEDIA_TEST_ENGINE'], $_SERVER['POLYMEDIA_TEST_TYPO']);
+        }
+    }
+
+    public static function playerEngineValues(): array
+    {
+        return [
+            'media chrome' => ['media-chrome', true],
+            'video.js' => ['videojs', true],
+            'env var set to an engine' => ['$POLYMEDIA_TEST_ENGINE', true],
+            'env var unset here' => ['$POLYMEDIA_TEST_UNSET', true],
+            'env var set to something else' => ['$POLYMEDIA_TEST_TYPO', false],
+            'unknown literal' => ['plyr', false],
+            'empty' => ['', false],
+        ];
+    }
+
+    /**
+     * @dataProvider videojsVersions
+     */
+    public function testVideojsVersionMustBeExact(string $version, bool $valid): void
+    {
+        if (\Yii::$app === null) {
+            new \yii\console\Application([
+                'id' => 'polymedia-tests',
+                'basePath' => dirname(__DIR__, 2),
+            ]);
+        }
+
+        $this->assertSame($valid, (new Settings(['videojsVersion' => $version]))->validate(['videojsVersion']));
+    }
+
+    public static function videojsVersions(): array
+    {
+        return [
+            ['10.1.0', true],
+            ['10.2.0-rc.1', true],
+            ['10', false],
+            ['^10.1.0', false],
+            ['latest', false],
+        ];
+    }
+
     public function testEditionsAreLiteThenPro(): void
     {
         $this->assertSame(

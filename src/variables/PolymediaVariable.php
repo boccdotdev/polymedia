@@ -88,6 +88,22 @@ class PolymediaVariable
     }
 
     /**
+     * Returns the active player engine, `media-chrome` or `videojs`.
+     *
+     * Lets templates branch during a trial, e.g. to pass Media Chrome or
+     * Video.js controls as `children`.
+     *
+     * @return string
+     *
+     * @author boccdotdev
+     * @since 2.4.0
+     */
+    public function getPlayerEngine(): string
+    {
+        return Plugin::getInstance()->getSettings()->getPlayerEngine();
+    }
+
+    /**
      * Checks whether a value is a polymedia asset.
      *
      * @param mixed $asset the value to check

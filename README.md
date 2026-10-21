@@ -8,7 +8,7 @@ Polymedia creates a lightweight `.pmedia` file for each media URL. It is a nativ
 
 The manifest stays in the folder your editor chooses. Polymedia-created posters and tracks live in a separate sidecar volume, outside normal asset browsing. Existing library assets selected as posters or tracks stay where they are.
 
-Use the Twig helpers or GraphQL data with your own front end, or render a player with one Twig call. The built-in renderer uses [Media Chrome](https://www.media-chrome.org/) and provider web components, with no required JavaScript framework.
+Use the Twig helpers or GraphQL data with your own front end, or render a player with one Twig call. The built-in renderer uses [Media Chrome](https://www.media-chrome.org/) and provider web components, with no required JavaScript framework. [Video.js v10](#videojs-player-optional) is available as an opt-in alternative.
 
 ## Requirements
 
@@ -210,7 +210,7 @@ Add to your layout template:
 {{ craft.polymedia.scripts() }}
 ```
 
-This emits `<script type="module">` tags for Media Chrome and the providers listed in your plugin settings.
+This emits `<script type="module">` tags for Media Chrome and the providers listed in your plugin settings. With the [Video.js engine](#videojs-player-optional) it emits the Video.js files instead.
 
 #### CDN Mode (default)
 
@@ -234,7 +234,7 @@ For Vite/webpack/import-map setups — `scripts()` emits nothing. Wire up the im
 
 ### `craft.polymedia.player(asset, options)`
 
-Renders a full `<media-controller>` player:
+Renders a full `<media-controller>` player (see [Video.js player](#videojs-player-optional) for the other engine's markup and options):
 
 ```twig
 {{ craft.polymedia.player(media) }}
@@ -263,7 +263,7 @@ Returns `true` if the value is a polymedia asset.
 
 ### `craft.polymedia.scripts(options)`
 
-Renders script tags. Options: `providers` (array), `version` (Media Chrome major), `mode` (`cdn`/`self-host`/`none`).
+Renders script tags. Options: `providers` (array), `version` (Media Chrome major), `mode` (`cdn`/`self-host`/`none`). The Video.js engine reads `version` as an exact Video.js version and adds `skins` and `locale`; see [Loading scripts](#loading-scripts).
 
 ### `craft.polymedia.poster(asset)`
 
@@ -412,6 +412,139 @@ Use the `children` option to add Media Chrome control elements:
     </media-control-bar>'
 }) }}
 ```
+
+## Video.js player (optional)
+
+Polymedia can render [Video.js v10](https://videojs.org/) players instead of Media Chrome. Video.js v10 is built by the Media Chrome team, and Media Chrome is expected to wind down as a standalone project. Media Chrome stays the default throughout 2.x, and nothing changes until you switch.
+
+### Switching engines
+
+Set **Player Engine** in the plugin settings. It applies to the whole site: Media Chrome and Video.js register the same element names, so the two can't load on the same page.
+
+To try Video.js in one environment first, select an environment variable for the setting and set it per environment:
+
+```bash
+# .env on staging
+POLYMEDIA_PLAYER_ENGINE=videojs
+```
+
+An unset or unrecognised value falls back to Media Chrome. Video.js needs Chrome 111, Firefox 113, Safari 16.2 or newer.
+
+`craft.polymedia.playerEngine` returns the active engine (`media-chrome` or `videojs`), so templates can branch while you trial it, for example to pass the right `children` markup.
+
+### Loading scripts
+
+Put `{{ craft.polymedia.scripts() }}` in your `<head>`. With Video.js it emits the Video.js stylesheet, a few layout rules, the video and audio skins, and one module per provider, all pinned to the **Video.js Version** setting (`10.1.0` by default):
+
+```twig
+{{ craft.polymedia.scripts({ providers: ['mux', 'youtube'] }) }}
+```
+
+Extra `scripts()` options with Video.js:
+
+- `skins`: extra skins to load alongside the configured one, e.g. `['neutral']`
+- `version`: an exact Video.js version, overriding the setting
+- `locale`: a language such as `de`, or `false` to skip translations. If you pass `locale` to `player()`, pass the same value here so the language pack loads.
+
+The layout rules and each player's `aspect-ratio` are inline styles. A Content Security Policy without `'unsafe-inline'` in `style-src` blocks them; in that case add the rules below to your own CSS and size players with `attrs: { class: … }`.
+
+In self-host mode, copy the contents of the `@videojs/cdn` package into your **Self-Host Base URL**, keeping its layout (`global.css`, `i18n.js`, `video*.js`, `audio*.js`, `locales/`, `media/` and the chunk files next to them). Add `jwplayer-video-element.min.js`, `peertube-video-element.min.js` or `videojs-video-element.min.js` at the top level if you use those providers.
+
+In none mode, load the files yourself and add these rules to your CSS. The first gives skins and `<media-container>` a block box so `aspect-ratio` applies, the second sizes iframe providers inside a skin, and the third lets standalone embeds fill the width:
+
+```css
+:where(video-skin,video-neutral-skin,video-compat-skin,audio-skin,audio-neutral-skin,audio-compat-skin):not(:defined),:where(media-container){display:block}
+:where(video-skin,video-neutral-skin,video-compat-skin,media-container)>:where(youtube-video,vimeo-video,cloudflare-video,twitch-video,tiktok-video){display:block;width:100%;height:100%;min-width:0;min-height:0}
+:where(jwplayer-video,peertube-video,videojs-video){display:block;width:100%}
+```
+
+### Rendered markup
+
+```twig
+{{ craft.polymedia.player(media) }}
+{# <video-player poster="…"><video-skin style="aspect-ratio: 16 / 9;"><mux-video src="https://stream.mux.com/abc123.m3u8" playsinline crossorigin="anonymous"></mux-video></video-skin></video-player> #}
+```
+
+- The poster goes on `<video-player>`, where the skin reads it.
+- Mux renders with a `src` stream URL. Video.js has no `playback-id` attribute.
+- Generic HLS uses `<hlsjs-video>`, which plays MPEG-TS streams.
+- Audio files render as `<audio-player><audio-skin>`. There is no cover image.
+- `class`, `id` and `attrs` go on the skin, which is the visible box. `mediaAttrs` still go on the media element.
+- On a site whose language Video.js translates, the player is wrapped in `<media-i18n lang="…">`. Pass `locale: false` to turn that off, or a language to override it.
+
+### Skins
+
+Choose the default under **Video.js Skin** (`default`, `neutral` or `compat`) or per player:
+
+```twig
+{{ craft.polymedia.player(media, { skin: 'neutral' }) }}
+```
+
+Load any extra skin with the `skins` option on `scripts()`. Style a skin with its CSS custom properties: `--media-accent-color`, `--media-accent-text-color`, `--media-border-color`, `--media-border-radius`, `--media-font-family`, `--media-object-fit`, `--media-object-position` and `--media-scale-unit`. See the [Video.js skin docs](https://videojs.org/docs/framework/html/guides/customize-skins).
+
+### Skin examples
+
+[`examples/videojs/`](examples/videojs) has two starting points. Copy the files into your project; Polymedia doesn't load them for you.
+
+**Brand theme** (`brand-theme.css`) restyles a packaged skin with its CSS custom properties only: accent colour, square corners, font and control size. No build step and no copied skin source:
+
+```twig
+{{ craft.polymedia.player(media, { class: 'brand-player' }) }}
+```
+
+**Media Chrome look-alike** (`media-chrome-controls.twig` and `media-chrome.css`) recreates Media Chrome's control bar with your own controls, so a site moving from Media Chrome keeps its look. Copy the Twig file to `templates/_polymedia/` and the CSS into your stylesheet:
+
+```twig
+{{ craft.polymedia.player(media, {
+    class: 'media-chrome',
+    children: include('_polymedia/media-chrome-controls.twig'),
+}) }}
+```
+
+The CSS reads Media Chrome's own variables first (`--media-primary-color`, `--media-control-background`, `--media-control-hover-background`, `--media-range-bar-color` and the rest), so colours and sizes you set for Media Chrome carry over. It differs in two small ways: times show as `00:00` rather than `0:00`, and controls the media can't use, such as captions without tracks, are hidden rather than disabled.
+
+### Box size
+
+The player reserves its box with an inline `aspect-ratio`, so lazy players don't shift the page. It uses the stored ratio ([`aspectRatio()`](#craftpolymediaaspectratioasset)), or 16 / 9 for video when the ratio isn't known. A ratio in your own `attrs.style` wins.
+
+```twig
+{{ craft.polymedia.player(media, { aspectRatio: '4 / 3' }) }}
+{{ craft.polymedia.player(media, { aspectRatio: false }) }}
+```
+
+### Custom controls
+
+Passing `children` drops the skin and renders `<media-container>` with your own Video.js controls. The skin's script defines every control element. They come unstyled and expose their state as `data-*` attributes (`data-paused`, `data-muted`, `data-fullscreen`, `data-active` on captions), which your CSS uses to pick icons. The poster goes on the media element, since there's no skin to show it.
+
+```twig
+{{ craft.polymedia.player(media, {
+    class: 'my-player',
+    children: '<media-controls>
+        <media-play-button><media-icon name="play"></media-icon><media-icon name="pause"></media-icon></media-play-button>
+        <media-mute-button><media-icon name="volume-high"></media-icon><media-icon name="volume-off"></media-icon></media-mute-button>
+        <media-fullscreen-button><media-icon name="fullscreen-enter"></media-icon><media-icon name="fullscreen-exit"></media-icon></media-fullscreen-button>
+    </media-controls>'
+}) }}
+```
+
+```css
+.my-player media-play-button[data-paused] [name="pause"],
+.my-player media-play-button:not([data-paused]) [name="play"],
+.my-player media-mute-button[data-muted] [name="volume-high"],
+.my-player media-mute-button:not([data-muted]) [name="volume-off"],
+.my-player media-fullscreen-button[data-fullscreen] [name="fullscreen-enter"],
+.my-player media-fullscreen-button:not([data-fullscreen]) [name="fullscreen-exit"] {
+  display: none;
+}
+```
+
+`<media-icon>` draws icons from the default skin, which `scripts()` loads unless you configure another skin. You can use your own SVGs instead. Sliders need their track, fill and thumb parts; the [Media Chrome look-alike](#skin-examples) shows a complete control bar.
+
+Media Chrome control markup isn't translated. Several elements were renamed (`media-time-range` is now `media-time-slider`, `media-control-bar` is now `media-controls`) and state attributes became `data-*` attributes. See the [migration guide](https://videojs.org/docs/framework/html/guides/migrate-from-media-chrome).
+
+### Providers without a Video.js element
+
+JW Player, PeerTube and Video.js (v8) embeds have no Video.js v10 element. They render as their standalone element with the provider's own controls and no skin, and still get the `aspect-ratio` box. Spotify also renders standalone, because its embedded widget is the only working control.
 
 ## Posters and Cover Artwork
 
