@@ -463,7 +463,7 @@ class MuxController extends Controller
             'element' => 'mux-video',
         ]);
 
-        $thumbnail = $plugin->getMux()->firstFrameThumbnailUrl($playbackId);
+        $thumbnail = $plugin->getMux()->thumbnailUrl($playbackId);
         $extraMetadata = array_filter([
             'muxAssetId' => $muxAssetId,
             'muxStatus' => $muxAsset['status'] ?? null,

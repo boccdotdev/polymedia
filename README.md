@@ -644,11 +644,11 @@ When creating media **without** a user-selected poster:
 
 1. **User poster** (create screen or asset editor) always wins — never overwritten by auto-fetch.
 2. Else if **Auto-Fetch Poster** is on (URL create), or always for **Mux library/upload** imports: download a still into the item's folder in the sidecar volume and attach it as the poster.
-3. **Mux** uses the Image API first frame: `https://image.mux.com/{playbackId}/thumbnail.jpg?time=0` (Mux’s default without `time` is mid-video).
+3. **Mux** uses Mux's own thumbnail, `https://image.mux.com/{playbackId}/thumbnail.jpg`: the asset's chosen thumbnail time, or else the middle of the video, the same image the Mux dashboard shows.
 4. If the Mux image is not ready yet, a queue job retries with backoff.
 5. Last resort: remote thumbnail URL only in manifest metadata (CP may show it until a local poster exists).
 
-CP asset index / picker thumbs for `.pmedia` files use the related poster when present, else the remote thumbnail URL.
+CP asset index / picker thumbs for `.pmedia` files use the related poster when present, at the poster's own aspect ratio, else the remote thumbnail URL.
 
 ## Accessibility
 

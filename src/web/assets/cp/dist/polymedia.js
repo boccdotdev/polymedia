@@ -1525,7 +1525,7 @@
             Craft.escapeHtml(
               Craft.t(
                 'polymedia',
-                'Poster will be generated from the first frame when ready.'
+                'A poster is added from the video when it’s ready.'
               )
             ) +
             '</p>'

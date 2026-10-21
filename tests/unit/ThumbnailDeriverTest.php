@@ -41,7 +41,7 @@ class ThumbnailDeriverTest extends TestCase
     {
         $detection = $this->_makeDetection('mux', 'abc123');
         $this->assertSame(
-            'https://image.mux.com/abc123/thumbnail.jpg?time=0',
+            'https://image.mux.com/abc123/thumbnail.jpg',
             $this->_deriver->derive($detection),
         );
     }

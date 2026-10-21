@@ -29,7 +29,7 @@ use yii\base\Component;
  * attaches it via {@see RelatedAssets}.
  *
  * Priority: existing related poster wins (user upload). Otherwise derive a
- * remote URL (Mux first frame at `?time=0`, other providers via ThumbnailDeriver)
+ * remote URL (Mux's own thumbnail, other providers via ThumbnailDeriver)
  * and download when possible. Mux assets that are still processing enqueue
  * {@see FetchMuxPoster}.
  *
@@ -217,7 +217,7 @@ class PosterFetcher extends Component
             return null;
         }
 
-        $url = Plugin::getInstance()->getMux()->firstFrameThumbnailUrl($playbackId);
+        $url = Plugin::getInstance()->getMux()->thumbnailUrl($playbackId);
         $status = $this->probeRemoteStatus($url);
 
         if ($status === 200) {

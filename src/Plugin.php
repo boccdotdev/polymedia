@@ -1348,7 +1348,7 @@ class Plugin extends BasePlugin
                     'Upload failed.',
                     'Upload cancelled.',
                     'Choose a video file.',
-                    'Poster will be generated from the first frame when ready.',
+                    'A poster is added from the video when it’s ready.',
                     'Cancel',
                 ]);
                 $view->registerJs(
@@ -1441,12 +1441,15 @@ class Plugin extends BasePlugin
                 $poster = $this->getRelatedAssets()->getPoster((int)$record->id);
 
                 if ($poster) {
-                    $url = Craft::$app->getAssets()->getThumbUrl(
-                        $poster,
+                    // A `.pmedia` has no dimensions, so Craft asks for a square;
+                    // keep the poster's own shape, as Craft does for images.
+                    [$width, $height] = Assets::scaledDimensions(
+                        (int)$poster->width,
+                        (int)$poster->height,
                         $event->width,
                         $event->height,
-                        false,
                     );
+                    $url = Craft::$app->getAssets()->getThumbUrl($poster, $width, $height, false);
 
                     if ($url) {
                         $event->url = $url;

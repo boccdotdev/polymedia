@@ -18,6 +18,8 @@
 - Asset selector modals with no field to select into, such as the one **From existing asset** opens, no longer show the menu. Uploading a video from there failed with "The field cannot accept another media item".
 - New `.pmedia` assets record the user who created them as their uploader, as uploaded files do.
 - A field restricted to one location with subfolders allowed now accepts media anywhere under that location, not only in its default upload subfolder.
+- Mux posters and library thumbnails use Mux's own thumbnail, the asset's chosen thumbnail time or else the middle of the video, so they match the Mux dashboard instead of showing the first frame, which is often blank. Posters already fetched don't change. `Mux::firstFrameThumbnailUrl()` is deprecated in favour of `Mux::thumbnailUrl()`.
+- Control panel thumbnails of `.pmedia` assets keep their poster's aspect ratio instead of a square crop.
 - Imported and uploaded videos show their media URL and type as read-only technical details on the asset edit screen.
 - Poster fetches no longer follow HTTP redirects.
 - An explicit manifest destination that's missing or not writable is refused instead of being redirected to another volume.
