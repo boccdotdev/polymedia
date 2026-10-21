@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.5.1 - Unreleased
+## 2.5.1 - 2026-10-21
 
 ### Fixed
 - Bunny posters now follow thumbnail changes made in Bunny. Imports, webhooks and `polymedia/bunny/sync` notice a new thumbnail file, and `polymedia/bunny/sync` also checks the thumbnail's ETag or Last-Modified, so it notices a thumbnail replaced at the same URL too. Polymedia then replaces the poster it fetched, and deletes the old file when nothing else uses it. A poster an editor chose is never replaced. New posters record where they came from in the item's `posterSource` metadata; posters fetched before 2.5.1 aren't tracked, so remove one from its asset and sync to fetch it again. ([#25](https://github.com/boccdotdev/polymedia/issues/25))
