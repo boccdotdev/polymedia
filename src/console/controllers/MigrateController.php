@@ -12,6 +12,7 @@
 namespace boccdotdev\polymedia\console\controllers;
 
 use boccdotdev\polymedia\Plugin;
+use boccdotdev\polymedia\services\LegacyFolders;
 use boccdotdev\polymedia\services\SidecarMigration;
 use Craft;
 use craft\console\Controller;
@@ -35,6 +36,11 @@ class MigrateController extends Controller
      */
     public bool $dryRun = false;
 
+    /**
+     * @var bool Delete the empty legacy folders instead of listing them.
+     */
+    public bool $apply = false;
+
     // Public Methods
     // =========================================================================
 
@@ -47,6 +53,10 @@ class MigrateController extends Controller
 
         if (in_array($actionID, ['folders', 'sidecars'], true)) {
             $options[] = 'dryRun';
+        }
+
+        if ($actionID === 'prune-folders') {
+            $options[] = 'apply';
         }
 
         return $options;
@@ -162,10 +172,70 @@ class MigrateController extends Controller
             $failures ? Console::FG_RED : Console::FG_GREEN,
         );
         $this->stdout(
-            'Legacy folders were not deleted. Review and remove empty folders from the Assets index.' . PHP_EOL,
+            'Legacy folders were not deleted. Run `polymedia/migrate/prune-folders` to list the empty ones.' . PHP_EOL,
             Console::FG_YELLOW,
         );
 
         return $failures ? ExitCode::UNSPECIFIED_ERROR : ExitCode::OK;
+    }
+
+    /**
+     * Lists the empty legacy folders left after polymedia/migrate/sidecars, and deletes them with --apply.
+     *
+     * A legacy folder is named after a .pmedia beside it, plus 8 letters or
+     * digits. It's deleted only when it holds no assets, trashed or not, no
+     * other folders and no files on disk. Nested folders go deepest first.
+     * Every folder that stays is listed with the reason.
+     *
+     * @return int
+     *
+     * @author boccdotdev
+     * @since 2.6.0
+     */
+    public function actionPruneFolders(): int
+    {
+        $plugin = Plugin::getInstance();
+        $manifests = Asset::find()
+            ->kind('polymedia')
+            ->status(null)
+            ->all();
+        $folders = new LegacyFolders(
+            Craft::$app->getAssets(),
+            $plugin->getSidecarStorage(),
+            $plugin->getRelatedAssets(),
+            $plugin->getMediaItems(),
+        );
+        $counts = ['planned' => 0, 'deleted' => 0, 'kept' => 0, 'failed' => 0];
+
+        foreach ($folders->prune($manifests, $this->apply) as $result) {
+            $counts[$result['status']]++;
+            $line = "  {$result['status']} #{$result['folderId']} {$result['path']}";
+
+            match ($result['status']) {
+                'failed' => $this->stderr("{$line}: {$result['message']}" . PHP_EOL, Console::FG_RED),
+                'kept' => $this->stdout("{$line}: {$result['message']}" . PHP_EOL, Console::FG_YELLOW),
+                default => $this->stdout($line . PHP_EOL),
+            };
+        }
+
+        if (!$this->apply) {
+            $this->stdout(
+                sprintf('%sWould delete %d folder(s); %d kept.%s', PHP_EOL, $counts['planned'], $counts['kept'], PHP_EOL),
+                Console::FG_GREEN,
+            );
+
+            if ($counts['planned']) {
+                $this->stdout('Run again with --apply to delete them.' . PHP_EOL);
+            }
+
+            return ExitCode::OK;
+        }
+
+        $this->stdout(
+            sprintf('%sDeleted %d folder(s); %d kept, %d failed.%s', PHP_EOL, $counts['deleted'], $counts['kept'], $counts['failed'], PHP_EOL),
+            $counts['failed'] ? Console::FG_RED : Console::FG_GREEN,
+        );
+
+        return $counts['failed'] ? ExitCode::UNSPECIFIED_ERROR : ExitCode::OK;
     }
 }
