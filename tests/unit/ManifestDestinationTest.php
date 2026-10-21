@@ -86,9 +86,20 @@ class ManifestDestinationTest extends TestCase
         $this->volumes(['sidecar', 'uploads', 'videos'], $permissions);
         $this->settings->defaultVolumeUid = 'uploads';
 
-        $folder = $this->writer->resolveFolder(20, $this->user, $this->settings);
+        // An explicit folder the user can't write to is refused, not redirected.
+        $this->assertNull($this->writer->resolveFolder(20, $this->user, $this->settings));
+        $this->assertNull($this->writer->resolveFolder(999, $this->user, $this->settings));
+        $this->assertSame(3, $this->writer->resolveFolder(null, $this->user, $this->settings)->volumeId);
+    }
 
-        $this->assertSame(3, $folder->volumeId);
+    public function testOnlyTheUsersOwnTemporaryFolderIsAccepted(): void
+    {
+        $this->user->admin = false;
+        $this->volumes(['uploads']);
+
+        // Like Craft's uploads: no volume permission, but only the user's own.
+        $this->assertSame(500, $this->writer->resolveFolder(500, $this->user, $this->settings)->id);
+        $this->assertNull($this->writer->resolveFolder(510, $this->user, $this->settings));
     }
 
     private function volumes(array $uids, ?UserPermissions $permissions = null): void
@@ -102,8 +113,12 @@ class ManifestDestinationTest extends TestCase
             $folders[$id] = new VolumeFolder(['id' => $id * 10, 'volumeId' => $id]);
         }
 
+        // Temporary upload folders have no volume: the user's own and someone else's.
+        $temporary = [500 => new VolumeFolder(['id' => 500]), 510 => new VolumeFolder(['id' => 510])];
+
         $assets = $this->createMock(Assets::class);
-        $assets->method('getFolderById')->willReturnCallback(static fn(int $id) => $folders[$id / 10] ?? null);
+        $assets->method('getFolderById')->willReturnCallback(static fn(int $id) => $temporary[$id] ?? ($id % 10 === 0 ? ($folders[intdiv($id, 10)] ?? null) : null));
+        $assets->method('getUserTemporaryUploadFolder')->willReturn($temporary[500]);
         $assets->method('getRootFolderByVolumeId')->willReturnCallback(static fn(int $id) => $folders[$id] ?? null);
         $volumeService = $this->createMock(Volumes::class);
         $volumeService->method('getAllVolumes')->willReturn($volumes);

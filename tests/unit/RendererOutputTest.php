@@ -18,6 +18,7 @@ use boccdotdev\polymedia\services\ManifestWriter;
 use boccdotdev\polymedia\services\MediaItems;
 use boccdotdev\polymedia\services\RelatedAssets;
 use boccdotdev\polymedia\services\Renderer;
+use boccdotdev\polymedia\services\SourceAssets;
 use boccdotdev\polymedia\services\UrlDetector;
 use Craft;
 use craft\elements\Asset;
@@ -67,6 +68,11 @@ class RendererOutputTest extends TestCase
      * @var Settings
      */
     private Settings $_settings;
+
+    /**
+     * @var ?string the current URL of a referenced source asset
+     */
+    private ?string $_sourceUrl = null;
 
     /**
      * @var string the current site's language
@@ -130,8 +136,11 @@ class RendererOutputTest extends TestCase
         );
 
         $plugin = $this->getMockBuilder(Plugin::class)->disableOriginalConstructor()
-            ->onlyMethods(['getMediaItems', 'getManifestWriter', 'getRelatedAssets', 'getUrlDetector', 'getSettings'])
+            ->onlyMethods(['getMediaItems', 'getManifestWriter', 'getRelatedAssets', 'getUrlDetector', 'getSettings', 'getSourceAssets'])
             ->getMock();
+        $sources = $this->createMock(SourceAssets::class);
+        $sources->method('resolveUrl')->willReturnCallback(fn() => $this->_sourceUrl);
+        $plugin->method('getSourceAssets')->willReturn($sources);
         $plugin->method('getMediaItems')->willReturn($items);
         $plugin->method('getManifestWriter')->willReturn($writer);
         $plugin->method('getRelatedAssets')->willReturn($related);
@@ -436,6 +445,106 @@ class RendererOutputTest extends TestCase
         }
 
         return $types;
+    }
+
+    public function testMp4PreferenceRendersTheRenditionOnBothEngines(): void
+    {
+        $manifest = self::_manifest('mux', 'https://stream.mux.com/pb1.m3u8', 'pb1', 'mux-video', [
+            'mp4Renditions' => [['url' => 'https://stream.mux.com/pb1/highest.mp4', 'status' => 'ready', 'width' => 1920, 'height' => 1080]],
+        ]);
+        $this->_given($manifest, ['element' => 'mux-video'], null, []);
+        $options = ['poster' => false, 'mediaAttrs' => ['SRC' => 'bad', 'playback-id' => 'bad', 'type' => 'application/x-mpegURL', 'data-x' => '1']];
+
+        // HLS stays the default and keeps the canonical stream.
+        $hls = (string)(new Renderer())->element($this->_polymediaAsset(), $options);
+        $this->assertStringContainsString('<mux-video playback-id="pb1"', $hls);
+        $this->assertStringNotContainsString('bad', $hls);
+        $this->assertStringContainsString('data-x="1"', $hls);
+
+        $mediaChrome = (string)(new Renderer())->player($this->_polymediaAsset(), $options + ['playbackFormat' => 'mp4']);
+        $this->assertStringContainsString('<media-controller><video src="https://stream.mux.com/pb1/highest.mp4" slot="media"', $mediaChrome);
+        $this->assertStringNotContainsString('bad', $mediaChrome);
+        $this->assertStringNotContainsString('application/x-mpegURL', $mediaChrome);
+
+        $this->_settings->muxDefaultPlaybackFormat = Settings::FORMAT_MP4;
+        $this->_settings->playerEngine = Settings::ENGINE_VIDEOJS;
+        $videojs = (string)(new Renderer())->player($this->_polymediaAsset(), ['poster' => false]);
+        $this->assertStringContainsString('<video src="https://stream.mux.com/pb1/highest.mp4"', $videojs);
+        $this->assertStringNotContainsString('mux-video', $videojs);
+        $this->assertStringNotContainsString('crossorigin', $videojs);
+
+        // A template can still ask for HLS.
+        $stream = (string)(new Renderer())->element($this->_polymediaAsset(), ['playbackFormat' => 'hls']);
+        $this->assertStringContainsString('<mux-video src="https://stream.mux.com/pb1.m3u8"', $stream);
+    }
+
+    public function testMp4PreferenceFallsBackToHlsWithoutAReadyRendition(): void
+    {
+        $this->_settings->muxDefaultPlaybackFormat = Settings::FORMAT_MP4;
+        $this->_given(self::_manifest('mux', 'https://stream.mux.com/pb1.m3u8', 'pb1', 'mux-video', [
+            'mp4Renditions' => [['url' => 'https://stream.mux.com/pb1/highest.mp4', 'status' => 'preparing']],
+        ]), ['element' => 'mux-video'], null, []);
+
+        $this->assertStringContainsString('<mux-video slot="media" playback-id="pb1"', (string)(new Renderer())->player($this->_polymediaAsset()));
+    }
+
+    public function testBunnyRendersHlsOnBothEnginesAndHidesUnavailableVideos(): void
+    {
+        $url = 'https://vz-example.b-cdn.net/657bb740-a71b-4529-a012-528021c31a92/playlist.m3u8';
+        $manifest = self::_manifest('bunny', $url, '133:657bb740-a71b-4529-a012-528021c31a92', 'hls-video', [
+            'bunnyStatus' => 4,
+            'mp4Renditions' => [['url' => 'https://vz-example.b-cdn.net/657bb740-a71b-4529-a012-528021c31a92/play_720p.mp4', 'status' => 'ready', 'height' => 720]],
+        ]);
+        $this->_given($manifest, ['element' => 'hls-video'], null, []);
+
+        $this->assertStringContainsString('<hls-video src="' . $url . '" slot="media"', (string)(new Renderer())->player($this->_polymediaAsset()));
+        $this->assertStringContainsString('<video src="https://vz-example.b-cdn.net/657bb740-a71b-4529-a012-528021c31a92/play_720p.mp4"', (string)(new Renderer())->element($this->_polymediaAsset(), ['playbackFormat' => 'mp4']));
+
+        $this->_settings->playerEngine = Settings::ENGINE_VIDEOJS;
+        $this->assertStringContainsString('<hlsjs-video src="' . $url . '"', (string)(new Renderer())->player($this->_polymediaAsset()));
+
+        $manifest['metadata']['bunnyStatus'] = -1;
+        $this->_given($manifest, ['element' => 'hls-video'], null, []);
+        $this->assertSame('', (string)(new Renderer())->player($this->_polymediaAsset()));
+        $this->assertSame('', (string)(new Renderer())->element($this->_polymediaAsset()));
+    }
+
+    public function testSharedProviderPackagesLoadOnce(): void
+    {
+        $scripts = (string)(new Renderer())->scripts(['hls', 'bunny']);
+
+        $this->assertSame(1, substr_count($scripts, 'hls-video-element@1'));
+        $this->assertStringNotContainsString('@mux/mux-video', $scripts);
+
+        $this->_settings->playerEngine = Settings::ENGINE_VIDEOJS;
+        $this->assertSame(1, substr_count((string)(new Renderer())->scripts(['hls', 'bunny']), 'media/hlsjs-video.js'));
+    }
+
+    public function testSourceReferencesPlayTheCurrentUrlOnBothEngines(): void
+    {
+        $manifest = self::_manifest('mp4', 'asset:uid-10', 'asset:uid-10', 'video', ['sourceAssetUid' => 'uid-10']);
+        $this->_given($manifest, ['element' => 'video'], null, []);
+        $this->_sourceUrl = 'https://media.example/renamed.mp4';
+
+        $this->assertSame('https://media.example/renamed.mp4', (new Renderer())->data($this->_polymediaAsset())['url']);
+        $this->assertStringContainsString('<video src="https://media.example/renamed.mp4"', (string)(new Renderer())->player($this->_polymediaAsset()));
+        $this->assertStringNotContainsString('asset:', (string)(new Renderer())->element($this->_polymediaAsset(), ['mediaAttrs' => ['src' => 'asset:uid-10']]));
+
+        $this->_settings->playerEngine = Settings::ENGINE_VIDEOJS;
+        $this->assertStringContainsString('<video src="https://media.example/renamed.mp4"', (string)(new Renderer())->player($this->_polymediaAsset()));
+
+        // A trashed or deleted source never falls back to a stored URL.
+        $this->_sourceUrl = null;
+        $this->assertSame('', (string)(new Renderer())->player($this->_polymediaAsset()));
+        $this->assertSame('', (string)(new Renderer())->element($this->_polymediaAsset()));
+    }
+
+    public function testScriptsAcceptAProviderList(): void
+    {
+        $this->assertSame(
+            (string)(new Renderer())->scripts(['providers' => ['mux']]),
+            (string)(new Renderer())->scripts(['mux']),
+        );
     }
 
     /**

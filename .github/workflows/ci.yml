@@ -49,7 +49,20 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Picker regression tests
+      - name: Install JS test dependencies
+        run: npm ci --prefix tests/js --ignore-scripts
+
+      # Composer ships Craft's built CP assets only. Native upload routing relies
+      # on how Craft's Uploader.js checks file kinds, so test against the source
+      # of the installed version rather than a stand-in.
+      - name: Fetch Craft's Uploader.js for the installed version
+        run: |
+          version=$(jq -r '.packages[] | select(.name == "craftcms/cms") | .version' composer.lock)
+          curl -fsSL "https://raw.githubusercontent.com/craftcms/cms/${version}/src/web/assets/cp/src/js/Uploader.js" -o "$RUNNER_TEMP/Uploader.js"
+          echo "POLYMEDIA_CRAFT_UPLOADER_SOURCE=$RUNNER_TEMP/Uploader.js" >> "$GITHUB_ENV"
+          echo "POLYMEDIA_REQUIRE_CRAFT_UPLOADER=1" >> "$GITHUB_ENV"
+
+      - name: CP JavaScript regression tests
         run: composer test-js
 
       - name: Easy Coding Standard

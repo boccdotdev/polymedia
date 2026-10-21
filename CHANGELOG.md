@@ -1,5 +1,36 @@
 # Changelog
 
+## 2.5.0 - 2026-10-21
+
+### Added
+- Bunny Stream hosting for Pro: library browsing and search, import, signed resumable direct uploads (tus), status, duration, dimension, MP4 and poster syncing, and `polymedia/bunny/sync`. Imported videos keep the library ID, video ID and native `*.b-cdn.net` host they were imported with. ([#10](https://github.com/boccdotdev/polymedia/issues/10), [#12](https://github.com/boccdotdev/polymedia/issues/12))
+- A **Video Hosting Provider** setting (Mux or Bunny Stream) for new imports and uploads. Authors get provider-neutral **Browse video library** and **Upload video** actions. Existing assets keep their own provider. ([#8](https://github.com/boccdotdev/polymedia/issues/8), [#11](https://github.com/boccdotdev/polymedia/issues/11))
+- A per-provider **Default Playback Format** (HLS or MP4 when available) and a `playbackFormat` option on `player()` and `element()`, rendered by both player engines. MP4 picks the highest ready rendition and falls back to HLS. New Mux uploads request a static rendition only when MP4 is preferred, and Mux rendition webhooks refresh renditions. ([#9](https://github.com/boccdotdev/polymedia/issues/9))
+- Optional signed Bunny Stream webhooks at `actions/polymedia/webhooks/bunny`, enabled by a **Bunny Webhook Verification Key** environment reference. ([#13](https://github.com/boccdotdev/polymedia/issues/13))
+- Optional deletion of the Bunny video when its `.pmedia` is permanently deleted, off by default. Trashing never deletes the video. ([#14](https://github.com/boccdotdev/polymedia/issues/14))
+- **Add video or audio → From existing asset** (Lite) references a public MP4, WebM or MOV asset by UID without copying or owning it. Twig and GraphQL resolve the source's current URL. ([#15](https://github.com/boccdotdev/polymedia/issues/15))
+- Pro, opt-in **Automatically host uploaded MP4 videos** for selected volumes: new MP4s from Craft's standard uploader go to the hosting provider and land as `.pmedia` assets. Mixed batches keep Craft's queue behavior; Craft Cloud volumes can't be routed because Cloud has its own uploader, and if another routed volume's filesystem type has a custom uploader, native uploads are disabled for every volume of that type rather than storing raw MP4s. ([#16](https://github.com/boccdotdev/polymedia/issues/16))
+- `scripts()` accepts a plain provider list, such as `scripts(['mux', 'bunny'])`.
+- An **Add video or audio** menu on Polymedia fields and on Assets fields that explicitly allow the Polymedia file kind, between **Add an asset** and **Upload a file**. It offers the items the field's allowed providers accept, puts the new or reused `.pmedia` in the field's upload location and selects it without opening the asset picker, in Matrix, nested entries and slideouts too. On a new entry whose upload location can't be resolved yet, the `.pmedia` goes to your temporary uploads and moves into place on save, like Craft's own uploads. It hides while the field is full, on Assets fields with **Allow uploads** off, and when you can't save assets to the field's upload location. ([#22](https://github.com/boccdotdev/polymedia/issues/22))
+
+### Changed
+- **Add media** is now **Add video or audio** on the Assets index and in asset pickers. A field's picker offers only the items its field allows, and **From URL** for a field only offers and saves the field's allowed providers.
+- Asset selector modals with no field to select into, such as the one **From existing asset** opens, no longer show the menu. Uploading a video from there failed with "The field cannot accept another media item".
+- New `.pmedia` assets record the user who created them as their uploader, as uploaded files do.
+- A field restricted to one location with subfolders allowed now accepts media anywhere under that location, not only in its default upload subfolder.
+- Mux posters and library thumbnails use Mux's own thumbnail, the asset's chosen thumbnail time or else the middle of the video, so they match the Mux dashboard instead of showing the first frame, which is often blank. Posters already fetched don't change. `Mux::firstFrameThumbnailUrl()` is deprecated in favour of `Mux::thumbnailUrl()`.
+- Control panel thumbnails of `.pmedia` assets keep their poster's aspect ratio instead of a square crop.
+- Imported and uploaded videos show their media URL and type as read-only technical details on the asset edit screen.
+- Poster fetches no longer follow HTTP redirects.
+- An explicit manifest destination that's missing or not writable is refused instead of being redirected to another volume.
+- Mux upload status and completion now require the signed upload context from preflight, and the `.pmedia` lands in the folder authorized at the start of the upload.
+- For Mux, Bunny and MP4 items, `mediaAttrs` can no longer override `src`, `playback-id` or `type`.
+
+### Upgrade notes
+- Nothing changes until you opt in: Mux stays the provider, HLS stays the playback format, and automatic routing stays off.
+- No database migration, MP4 backfill, re-encode or remote deletion runs on upgrade.
+- Bunny support covers anonymous playback from native `*.b-cdn.net` hosts only. Bunny's hosted player, token authentication, referrer restrictions, DRM and custom CDN domains aren't supported.
+
 ## 2.4.0 - 2026-10-21
 
 ### Added

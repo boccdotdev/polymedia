@@ -16,7 +16,7 @@ use Craft;
 use craft\queue\BaseJob;
 
 /**
- * Retries downloading a Mux first-frame poster until the image CDN is ready
+ * Retries downloading a Mux thumbnail poster until the image CDN is ready
  * or the attempt budget is exhausted.
  *
  * @author boccdotdev
@@ -73,7 +73,7 @@ class FetchMuxPoster extends BaseJob
 
         $this->setProgress($queue, 0.2);
 
-        $url = $plugin->getMux()->firstFrameThumbnailUrl($this->playbackId);
+        $url = $plugin->getMux()->thumbnailUrl($this->playbackId);
         try {
             $poster = $plugin->getPosterFetcher()->fetchForItem($record, $url);
         } catch (\Throwable $e) {

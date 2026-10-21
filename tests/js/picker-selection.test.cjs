@@ -9,7 +9,7 @@ const source = fs.readFileSync(
   'utf8'
 );
 
-function setup({ selected = [], disabled = [], limit = 3, eligible = true } = {}) {
+function setup({ selected = [], disabled = [], limit = 3, eligible = true, config = {}, $ = (value) => value } = {}) {
   const errors = [];
   const notices = [];
   const requests = [];
@@ -31,8 +31,8 @@ function setup({ selected = [], disabled = [], limit = 3, eligible = true } = {}
   };
   vm.runInNewContext(source, {
     Craft,
-    window: {},
-    $: (value) => value,
+    window: { CraftPolymediaConfig: config },
+    $,
     Garnish: {
       Modal: { extend: (definition) => definition },
       $doc: { ready() {} },
@@ -362,7 +362,7 @@ test('rejects malformed asset IDs rather than selecting an ID prefix', async () 
   assert.equal(s.requests.length, 0);
 });
 
-test('Mux import and upload keep their dialogs open and withhold success on refusal', async () => {
+test('video import and upload keep their dialogs open and withhold success on refusal', async () => {
   for (const kind of ['import', 'upload']) {
     const s = setup({ eligible: false });
     const request = s.Craft.sendActionRequest;
@@ -377,7 +377,7 @@ test('Mux import and upload keep their dialogs open and withhold success on refu
       prop() { return this; },
     };
     const modal = {
-      assetIndex: s.index,
+      destination: s.picker.indexDestination(s.index),
       hide: () => { hidden = true; },
       $title: { val: () => '' },
       _setStatus() {},
@@ -385,9 +385,9 @@ test('Mux import and upload keep their dialogs open and withhold success on refu
       _fail: assert.fail,
     };
     if (kind === 'import') {
-      s.picker.MuxBrowseModal._import.call(modal, { assetId: 'mux-id' }, button);
+      s.picker.VideoBrowseModal._import.call(modal, { assetId: 'mux-id' }, button);
     } else {
-      s.picker.MuxUploadModal._complete.call(modal, 'mux-id');
+      s.picker.VideoUploadModal._complete.call(modal, { assetId: 42 });
     }
     await new Promise(setImmediate);
     assert.equal(hidden, false);
@@ -399,11 +399,437 @@ test('Mux import and upload keep their dialogs open and withhold success on refu
 test('URL submit awaits selection and withholds success on refusal', async () => {
   const s = setup({ eligible: false });
   let submit;
-  s.Craft.CpScreenSlideout = function () {
+  let params;
+  s.Craft.CpScreenSlideout = function (_action, options) {
+    params = options.params;
     this.on = (_event, callback) => { submit = callback; };
   };
-  s.picker.openSlideout(s.index);
+  s.input.settings = { fieldId: 7, sourceElementId: 8 };
+  s.index.currentFolderId = 4;
+  s.picker.openSlideout(s.picker.indexDestination(s.index));
+  // The picker's field narrows the URL form to its allowed providers.
+  assert.equal(params.folderId, 4);
+  assert.equal(params.fieldId, 7);
   await submit({ response: { data: { assetId: 42 } } });
   assert.equal(s.notices.length, 0);
   assert.equal(s.errors.length, 1);
+});
+
+function menuLabels(s, allowed = null) {
+  const items = [];
+  s.picker._populateAddMediaMenu({
+    data: () => ({ addItem: (item) => items.push(item) }),
+    children: () => ({ empty() {} }),
+  }, s.picker.menuItems(allowed), async () => null);
+  return items.map((item) => item.label);
+}
+
+test('the Add video or audio menu follows the selected provider', () => {
+  const mux = setup({ config: { videoProvider: 'mux', videoEnabled: true } });
+  assert.deepEqual(menuLabels(mux), ['From URL', 'From existing asset', 'Browse video library', 'Upload video']);
+  assert.equal(mux.picker.videoAction('library'), 'polymedia/mux/library');
+
+  const bunny = setup({ config: { videoProvider: 'bunny', videoEnabled: true } });
+  assert.ok(menuLabels(bunny).includes('Browse video library'));
+  assert.equal(bunny.picker.videoAction('library'), 'polymedia/bunny/library');
+});
+
+test('Lite and unconfigured sites keep URL and existing-asset media only', () => {
+  assert.deepEqual(menuLabels(setup()), ['From URL', 'From existing asset']);
+  assert.deepEqual(menuLabels(setup({ config: { videoProvider: 'bunny', videoEnabled: false } })), ['From URL', 'From existing asset']);
+});
+
+test('a field narrows the menu to the items it allows', () => {
+  const pro = setup({ config: { videoEnabled: true } });
+  assert.deepEqual(menuLabels(pro, ['url', 'upload']), ['From URL', 'Upload video']);
+  // Lite can't offer video items even if the server listed them.
+  assert.deepEqual(menuLabels(setup(), ['library', 'upload']), []);
+});
+
+test('Bunny import sends videoId and keeps field-selection refusal protection', async () => {
+  const s = setup({ eligible: false, config: { videoProvider: 'bunny', videoEnabled: true } });
+  const request = s.Craft.sendActionRequest;
+  let imported;
+  s.Craft.sendActionRequest = (method, action, options) => {
+    if (action === 'polymedia/bunny/import') {
+      imported = options.data;
+      return Promise.resolve({ data: { assetId: 42 } });
+    }
+    return request(method, action, options);
+  };
+  const button = { addClass() { return this; }, removeClass() { return this; }, prop() { return this; } };
+  s.index.currentFolderId = 4;
+  s.picker.VideoBrowseModal._import.call({
+    destination: s.picker.indexDestination(s.index), hide: assert.fail,
+  }, { assetId: 'bunny-id', title: 'Video' }, button);
+  await new Promise(setImmediate);
+  assert.equal(imported.videoId, 'bunny-id');
+  assert.equal(imported.folderId, 4);
+  assert.equal(imported.muxAssetId, undefined);
+  assert.equal(s.notices.length, 0);
+  assert.equal(s.errors.length, 1);
+});
+
+test('explicit upload refuses a full field before any provider request', () => {
+  const s = setup({ selected: [1], limit: 1 });
+  s.Craft.PolymediaVideoUpload = assert.fail;
+  s.picker.VideoUploadModal.startUpload.call({
+    destination: s.picker.indexDestination(s.index), $file: [{ files: [{ name: 'video.mp4' }] }],
+  });
+  assert.equal(s.errors.length, 1);
+  assert.equal(s.requests.length, 0);
+});
+
+test('upload context carries the picker field, draft element and owner site', () => {
+  const s = setup();
+  s.index.currentFolderId = 4;
+  assert.deepEqual({ ...s.picker.uploadContext(s.index) }, { folderId: 4, siteId: 2 });
+
+  s.input.settings = { fieldId: 7, sourceElementId: 8, referenceElementSiteId: 3 };
+  s.input.elementEditor = { getDraftElementId: (id) => (id === 8 ? 9 : id) };
+  assert.deepEqual({ ...s.picker.uploadContext(s.index) }, { folderId: 4, siteId: 3, fieldId: 7, elementId: 9 });
+});
+
+test('existing asset action is video-only and checks destination selection', async () => {
+  const s = setup({ eligible: false });
+  let selector;
+  let imported;
+  s.Craft.createElementSelectorModal = (_type, settings) => { selector = settings; };
+  const request = s.Craft.sendActionRequest;
+  s.Craft.sendActionRequest = (method, action, options) => {
+    if (action === 'polymedia/source-assets/import') {
+      imported = options.data;
+      return Promise.resolve({ data: { assetId: 42 } });
+    }
+    return request(method, action, options);
+  };
+  s.picker.openSourceAsset(s.picker.indexDestination(s.index));
+  assert.equal(selector.criteria.kind, 'video');
+  assert.equal(selector.multiSelect, false);
+  await selector.onSelect([{ id: 11 }]);
+  assert.equal(imported.sourceAssetId, 11);
+  assert.equal(s.notices.length, 0);
+  assert.equal(s.errors.length, 1);
+});
+
+test('pickers offer the menu only when their field can hold video or audio', () => {
+  const s = setup({ config: { videoEnabled: true } });
+  const keys = (index) => {
+    const items = s.picker._indexMenuItems(index);
+    return items && [...items.map((item) => item.key)];
+  };
+  // The standalone Assets index offers everything.
+  assert.deepEqual(keys({ settings: { context: 'index' } }), ['url', 'existing', 'library', 'upload']);
+
+  s.input.settings = { criteria: { kind: [] } };
+  assert.equal(keys(s.index).length, 4);
+  s.input.settings = { criteria: { kind: ['image'] } };
+  assert.equal(keys(s.index), null);
+  s.input.settings = { criteria: { kind: ['polymedia'] } };
+  s.input._polymediaFieldMedia = { items: ['url'], canAdd: false };
+  assert.deepEqual(keys(s.index), ['url']);
+
+  // e.g. From existing asset's own selector: nothing to select into.
+  const bare = { settings: { modal: { settings: {}, selectElements() {} } } };
+  assert.equal(keys(bare), null);
+});
+
+// Minimal jQuery stand-in for building the field button.
+function fakeQuery() {
+  const nodes = [];
+  const $ = (html) => {
+    if (html === undefined) {
+      return { length: 0 };
+    }
+    const classes = new Set((/class="([^"]*)"/.exec(String(html)) || ['', ''])[1].split(/\s+/).filter(Boolean));
+    const node = {
+      html: String(html),
+      length: 1,
+      classes,
+      insertAfter(target) { node.placedAfter = target; return node; },
+      after(next) { node.next = next; return node; },
+      disclosureMenu() {
+        node.next.menu = { items: [], addItem(item) { this.items.push(item); } };
+        return node;
+      },
+      data(key) { return key === 'disclosureMenu' ? node.menu : undefined; },
+      children() { return { empty() {} }; },
+      toggleClass(name, on) { if (on) classes.add(name); else classes.delete(name); return node; },
+    };
+    nodes.push(node);
+    return node;
+  };
+  return { $, nodes };
+}
+
+function fieldSetup({ config = { items: ['url', 'existing'], canAdd: true }, ...options } = {}) {
+  const query = fakeQuery();
+  const s = setup({ ...options, $: query.$ });
+  s.Craft.escapeHtml = (value) => value;
+  const states = [];
+  Object.assign(s.input, {
+    settings: {
+      fieldId: 7,
+      sourceElementId: 8,
+      referenceElementSiteId: 3,
+      criteria: { kind: ['polymedia'], siteId: 2 },
+      elementType: 'craft\\elements\\Asset',
+      viewMode: 'large',
+    },
+    $container: {
+      next: () => (config ? { length: 1, data: () => ({ fieldId: 7, ...config }) } : { length: 0 }),
+    },
+    $addElementBtn: { length: 1, prop: () => false },
+    enableAddElementsBtn() { states.push('enable'); },
+    disableAddElementsBtn() { states.push('disable'); },
+    updateAddElementsBtn() {
+      if (this.canAddMoreElements()) this.enableAddElementsBtn();
+      else this.disableAddElementsBtn();
+    },
+    updateDisabledElementsInModal() {},
+  });
+  return { ...s, states, nodes: query.nodes };
+}
+
+test('the field button needs the field menu and permission to add', () => {
+  // Another field's menu must not be adopted either.
+  for (const config of [
+    null,
+    { items: ['url'], canAdd: false },
+    { items: [], canAdd: true },
+    { items: ['url'], canAdd: true, fieldId: 8 },
+  ]) {
+    const s = fieldSetup({ config });
+    s.picker.initFieldButton(s.input);
+    assert.equal(s.nodes.length, 0);
+  }
+
+  // Lite drops video items, so a video-only field has nothing to offer.
+  const lite = fieldSetup({ config: { items: ['upload'], canAdd: true } });
+  lite.picker.initFieldButton(lite.input);
+  assert.equal(lite.nodes.length, 0);
+});
+
+test('the field button sits after Add an asset and hides when the field is full', () => {
+  const selected = [];
+  const s = fieldSetup({ selected, limit: 1, config: { items: ['url', 'existing', 'upload'], canAdd: true } });
+  s.picker.initFieldButton(s.input);
+  const [button, menu] = s.nodes;
+  assert.ok(button.html.includes('Add video or audio'));
+  assert.ok(button.classes.has('dashed'));
+  // Before Upload a file, which opens the file input right after it.
+  assert.equal(button.placedAfter, s.input.$addElementBtn);
+  assert.deepEqual(menu.menu.items.map((item) => item.label), ['From URL', 'From existing asset']);
+  assert.equal(button.classes.has('hidden'), false);
+  assert.deepEqual(s.states, ['enable']);
+
+  selected.push(1);
+  s.input.updateAddElementsBtn();
+  assert.equal(button.classes.has('hidden'), true);
+  assert.deepEqual(s.states, ['enable', 'disable']);
+
+  // Its picker offers the same items.
+  assert.deepEqual([...s.picker._indexMenuItems(s.index).map((item) => item.key)], ['url', 'existing']);
+});
+
+test('the field destination comes from the server for the draft being edited', async () => {
+  const s = fieldSetup();
+  s.input.elementEditor = { getDraftElementId: (id) => (id === 8 ? 9 : id) };
+  s.Craft.sendActionRequest = async (method, action, options) => {
+    s.requests.push({ method, action, data: options.data });
+    return { data: { folderId: 12 } };
+  };
+  const destination = await s.picker.fieldDestination(s.input);
+  assert.equal(s.requests[0].action, 'polymedia/field-media/destination');
+  assert.deepEqual({ ...s.requests[0].data }, { fieldId: 7, elementId: 9, siteId: 3 });
+  assert.equal(destination.folderId, 12);
+  assert.equal(destination.fieldId, 7);
+  assert.equal(destination.selects, true);
+  assert.equal(destination.canAccept(), true);
+});
+
+test('the draft is created first for someone who cannot save the entry itself', async () => {
+  const s = fieldSetup();
+  const calls = [];
+  const drafts = {};
+  s.input.elementEditor = {
+    settings: { canSaveCanonical: false },
+    ensureIsDraftOrRevision: async () => { calls.push('draft'); drafts[8] = 15; },
+    getDraftElementId: (id) => drafts[id] || id,
+  };
+  s.Craft.sendActionRequest = async (_method, action, options) => {
+    calls.push(action);
+    s.requests.push({ data: options.data });
+    return { data: { folderId: 12 } };
+  };
+  await s.picker.fieldDestination(s.input);
+  assert.deepEqual(calls, ['draft', 'polymedia/field-media/destination']);
+  assert.equal(s.requests[0].data.elementId, 15);
+
+  // Editors who can save the entry don't get a draft just for opening the menu.
+  calls.length = 0;
+  s.input.elementEditor.settings.canSaveCanonical = true;
+  await s.picker.fieldDestination(s.input);
+  assert.deepEqual(calls, ['polymedia/field-media/destination']);
+});
+
+test('the field context falls back to the relation site', () => {
+  const s = fieldSetup();
+  delete s.input.settings.referenceElementSiteId;
+  assert.equal(s.picker.fieldContext(s.input).siteId, 2);
+  delete s.input.settings.criteria.siteId;
+  assert.equal(s.picker.fieldContext(s.input).siteId, 1);
+});
+
+test('a full or busy field resolves no destination', async () => {
+  const full = fieldSetup({ selected: [1], limit: 1 });
+  assert.equal(await full.picker.fieldDestination(full.input), null);
+  assert.equal(full.requests.length, 0);
+
+  const s = fieldSetup();
+  let resolve;
+  s.Craft.sendActionRequest = () => new Promise((done) => { resolve = done; });
+  const first = s.picker.fieldDestination(s.input);
+  assert.equal(await s.picker.fieldDestination(s.input), null);
+  resolve({ data: { folderId: 12 } });
+  assert.equal((await first).folderId, 12);
+});
+
+test('a refused destination reports the server message and opens nothing', async () => {
+  const s = fieldSetup();
+  let opened = false;
+  s.picker.openSlideout = () => { opened = true; };
+  await s.picker.open({ open: 'openSlideout' }, async () => {
+    throw { response: { data: { message: 'You cannot add media to this field’s upload location.' } } };
+  });
+  await s.picker.open({ open: 'openSlideout' }, async () => { throw new Error('offline'); });
+  assert.equal(opened, false);
+  assert.deepEqual(s.errors, ['You cannot add media to this field’s upload location.', 'Could not add video or audio.']);
+});
+
+test('select inputs get the field button when they initialize', () => {
+  const initialized = [];
+  function AssetSelectInput() {}
+  AssetSelectInput.prototype.init = function (settings) {
+    initialized.push(settings.id);
+    this.settings = settings;
+  };
+  AssetSelectInput.extend = () => function PosterInput() {};
+  const Craft = {
+    AssetSelectInput,
+    t: (_category, text) => text,
+  };
+  vm.runInNewContext(source, {
+    Craft,
+    window: { CraftPolymediaConfig: {} },
+    $: (value) => value,
+    Garnish: { Modal: { extend: (definition) => definition }, $doc: { ready() {} } },
+  });
+  const seen = [];
+  Craft.Polymedia.initFieldButton = (input) => seen.push(input.settings.id);
+  const input = new AssetSelectInput();
+  input.init({ id: 'fields-polymedia' });
+  // Craft's own init runs first, then the button.
+  assert.deepEqual(initialized, ['fields-polymedia']);
+  assert.deepEqual(seen, ['fields-polymedia']);
+});
+
+function prepareFieldSelection(s, { selectable = true } = {}) {
+  const calls = [];
+  s.input.elementEditor = {
+    getDraftElementId: (id) => id,
+    pause: () => calls.push('pause'),
+    resume: () => calls.push('resume'),
+  };
+  s.input.selectElements = async (elements) => {
+    calls.push('select');
+    s.selected.push(elements[0].id);
+  };
+  s.Craft.getElementInfo = () => ({ id: 42, siteId: 2 });
+  s.Craft.appendHeadHtml = async () => calls.push('head');
+  s.Craft.appendBodyHtml = async () => calls.push('body');
+  s.Craft.sendActionRequest = async (method, action, options) => {
+    s.requests.push({ method, action, data: options.data });
+    return action === 'app/render-elements'
+      ? { data: { elements: { 42: ['rendered'] } } }
+      : { data: { selectable } };
+  };
+  return calls;
+}
+
+test('field selection checks the field on the server, then adds through the input', async () => {
+  const s = fieldSetup();
+  const calls = prepareFieldSelection(s);
+  assert.equal(await s.picker.finishFieldSelection(s.input, '42'), true);
+  assert.equal(s.requests[0].action, 'polymedia/field-media/check');
+  assert.deepEqual({ ...s.requests[0].data }, { fieldId: 7, elementId: 8, siteId: 3, assetId: 42 });
+  // Rendered in the site the field relates its assets in.
+  assert.equal(s.requests[1].action, 'app/render-elements');
+  assert.equal(s.requests[1].data.elements[0].siteId, 2);
+  assert.equal(s.requests[1].data.elements[0].instances[0].size, 'large');
+  assert.deepEqual(calls, ['pause', 'head', 'body', 'select', 'resume']);
+  assert.deepEqual(s.selected, [42]);
+  assert.equal(s.input._polymediaSelecting, false);
+  assert.equal(s.errors.length, 0);
+});
+
+test('field selection refuses ineligible, duplicate and full results', async () => {
+  const ineligible = fieldSetup();
+  prepareFieldSelection(ineligible, { selectable: false });
+  assert.equal(await ineligible.picker.finishFieldSelection(ineligible.input, 42), false);
+  assert.equal(ineligible.requests.length, 1);
+  assert.equal(ineligible.errors.length, 1);
+
+  const duplicate = fieldSetup({ selected: [42] });
+  prepareFieldSelection(duplicate);
+  assert.equal(await duplicate.picker.selectIntoInput(duplicate.input, 42), false);
+  assert.equal(duplicate.requests.length, 0);
+
+  // Filled while the check was in flight.
+  const raced = fieldSetup({ limit: 1 });
+  const calls = prepareFieldSelection(raced);
+  const request = raced.Craft.sendActionRequest;
+  raced.Craft.sendActionRequest = async (...args) => {
+    raced.selected.push(1);
+    return request(...args);
+  };
+  assert.equal(await raced.picker.selectIntoInput(raced.input, 42), false);
+  assert.equal(calls.includes('select'), false);
+});
+
+test('a failed render leaves the field unchanged and resumes the editor', async () => {
+  const s = fieldSetup();
+  const calls = prepareFieldSelection(s);
+  s.Craft.appendBodyHtml = async () => { throw new Error('script failed'); };
+  assert.equal(await s.picker.finishFieldSelection(s.input, 42), false);
+  assert.deepEqual(s.selected, []);
+  assert.equal(calls.at(-1), 'resume');
+  assert.equal(s.input._polymediaSelecting, false);
+  assert.equal(s.errors.length, 1);
+});
+
+test('field uploads send the field binding to preflight', () => {
+  const s = fieldSetup({ config: { items: ['upload'], canAdd: true } });
+  let context;
+  s.Craft.PolymediaVideoUpload = (_file, uploadContext) => {
+    context = uploadContext;
+    return { promise: new Promise(() => {}), abort() {} };
+  };
+  const destination = {
+    ...s.picker.fieldContext(s.input),
+    folderId: 12,
+    selects: true,
+    canAccept: () => true,
+    finish: assert.fail,
+  };
+  s.picker.VideoUploadModal.startUpload.call({
+    destination,
+    $file: [{ files: [{ name: 'video.mp4' }] }],
+    $title: { val: () => 'Film' },
+    $progress: { prop() {} },
+    _setUiBusy() {},
+    _setProgress() {},
+    _setStatus() {},
+  });
+  assert.deepEqual({ ...context }, { title: 'Film', folderId: 12, siteId: 3, fieldId: 7, elementId: 8 });
 });

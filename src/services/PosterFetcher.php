@@ -11,6 +11,7 @@
 
 namespace boccdotdev\polymedia\services;
 
+use boccdotdev\polymedia\jobs\FetchBunnyPoster;
 use boccdotdev\polymedia\jobs\FetchMuxPoster;
 use boccdotdev\polymedia\models\DetectionResult;
 use boccdotdev\polymedia\Plugin;
@@ -28,7 +29,7 @@ use yii\base\Component;
  * attaches it via {@see RelatedAssets}.
  *
  * Priority: existing related poster wins (user upload). Otherwise derive a
- * remote URL (Mux first frame at `?time=0`, other providers via ThumbnailDeriver)
+ * remote URL (Mux's own thumbnail, other providers via ThumbnailDeriver)
  * and download when possible. Mux assets that are still processing enqueue
  * {@see FetchMuxPoster}.
  *
@@ -216,7 +217,7 @@ class PosterFetcher extends Component
             return null;
         }
 
-        $url = Plugin::getInstance()->getMux()->firstFrameThumbnailUrl($playbackId);
+        $url = Plugin::getInstance()->getMux()->thumbnailUrl($playbackId);
         $status = $this->probeRemoteStatus($url);
 
         if ($status === 200) {
@@ -247,6 +248,45 @@ class PosterFetcher extends Component
         Craft::$app->getQueue()->delay($this->backoffSeconds($attempt))->push(new FetchMuxPoster([
             'itemId' => (int)$record->id,
             'playbackId' => $playbackId,
+            'attempt' => $attempt,
+        ]));
+    }
+
+    /**
+     * Queues a poster download for a Bunny item that has a public thumbnail
+     * and no poster yet.
+     *
+     * The download runs in {@see FetchBunnyPoster}, off the request, and
+     * retries while the CDN catches up.
+     *
+     * @param MediaItemRecord $record the media item (type bunny)
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function ensureBunnyPoster(MediaItemRecord $record): void
+    {
+        if (Plugin::getInstance()->getRelatedAssets()->getPoster((int)$record->id)) {
+            return;
+        }
+
+        $this->queueBunnyPoster($record);
+    }
+
+    /**
+     * Queues a retryable Bunny poster download job.
+     *
+     * @param MediaItemRecord $record the media item
+     * @param int $attempt current attempt (0-based)
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function queueBunnyPoster(MediaItemRecord $record, int $attempt = 0): void
+    {
+        Craft::$app->getQueue()->delay($attempt > 0 ? $this->backoffSeconds($attempt) : 0)->push(new FetchBunnyPoster([
+            'itemId' => (int)$record->id,
+            'providerId' => (string)$record->providerId,
             'attempt' => $attempt,
         ]));
     }
@@ -300,6 +340,9 @@ class PosterFetcher extends Component
     /**
      * HEAD/GET probe of a remote image URL; returns HTTP status or null on network error.
      *
+     * Redirects aren't followed, so a poster URL can't bounce the server to
+     * another host.
+     *
      * @param string $url
      * @return ?int
      *
@@ -309,7 +352,7 @@ class PosterFetcher extends Component
     public function probeRemoteStatus(string $url): ?int
     {
         try {
-            $client = Craft::createGuzzleClient(['timeout' => 10, 'http_errors' => false]);
+            $client = Craft::createGuzzleClient(['timeout' => 10, 'http_errors' => false, 'allow_redirects' => false]);
             $response = $client->head($url);
 
             $status = $response->getStatusCode();
@@ -331,7 +374,7 @@ class PosterFetcher extends Component
     }
 
     /**
-     * Downloads a remote image to a temp file.
+     * Downloads a remote image to a temp file. Redirects aren't followed.
      *
      * @param string $url
      * @return ?array{path: string, extension: string} null when not HTTP 200
@@ -342,7 +385,7 @@ class PosterFetcher extends Component
     public function downloadToTemp(string $url): ?array
     {
         try {
-            $client = Craft::createGuzzleClient(['timeout' => 30, 'http_errors' => false]);
+            $client = Craft::createGuzzleClient(['timeout' => 30, 'http_errors' => false, 'allow_redirects' => false]);
             $response = $client->get($url);
 
             if ($response->getStatusCode() !== 200) {

@@ -33,6 +33,7 @@ class MediaChrome extends PlayerEngine
      */
     public const SCRIPT_MAP = [
         'hls' => 'hls-video-element@1',
+        'bunny' => 'hls-video-element@1',
         'dash' => 'dash-video-element@0',
         'shaka' => 'shaka-video-element@0',
         'mux' => '@mux/mux-video@0',
@@ -159,7 +160,8 @@ class MediaChrome extends PlayerEngine
             }
         }
 
-        return implode("\n", $tags);
+        // Providers can share a package (`hls` and `bunny`).
+        return implode("\n", array_unique($tags));
     }
 
     // Private Methods
@@ -186,7 +188,7 @@ class MediaChrome extends PlayerEngine
                 $attrs['stream-type'] = 'on-demand';
             }
         } else {
-            $attrs['src'] = $manifest['url'] ?? '';
+            $attrs['src'] = $context->src;
         }
 
         $attrs += $this->playbackAttributes($context->settings, $emitControls);

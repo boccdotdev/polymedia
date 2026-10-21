@@ -13,6 +13,8 @@ namespace boccdotdev\polymedia\gql\loaders;
 
 use boccdotdev\polymedia\Plugin;
 use boccdotdev\polymedia\records\MediaItemRecord;
+use boccdotdev\polymedia\services\MediaItems;
+use boccdotdev\polymedia\services\SourceAssets;
 
 /**
  * Query-scoped batch loader for media item records keyed by asset ID.
@@ -109,6 +111,20 @@ final class MediaItemLoader
         }
 
         $records = Plugin::getInstance()->getMediaItems()->getByAssetIds($assetIds);
+        $references = [];
+
+        foreach ($records as $record) {
+            $manifest = ['providerId' => $record->providerId, 'metadata' => MediaItems::decodeMetadataJson($record->metadata)];
+
+            if (SourceAssets::isReference($manifest)) {
+                $references[] = $manifest;
+            }
+        }
+
+        // Source asset references resolve their URLs with one query per batch.
+        if ($references !== []) {
+            Plugin::getInstance()->getSourceAssets()->prime($references);
+        }
 
         foreach ($assetIds as $assetId) {
             self::$_loaded[$assetId] = $records[$assetId] ?? null;

@@ -44,8 +44,8 @@ class ThumbnailDeriver extends Component
         }
 
         return match ($detection->type) {
-            // time=0 = first frame (Mux default without time is mid-video)
-            'mux' => "https://image.mux.com/{$detection->providerId}/thumbnail.jpg?time=0",
+            // Mux's own thumbnail: its chosen time, else mid-video, as in the dashboard
+            'mux' => "https://image.mux.com/{$detection->providerId}/thumbnail.jpg",
             'youtube' => "https://i.ytimg.com/vi/{$detection->providerId}/maxresdefault.jpg",
             'vimeo' => "https://vumbnail.com/{$detection->providerId}.jpg",
             'cloudflare' => "https://videodelivery.net/{$detection->providerId}/thumbnails/thumbnail.jpg",

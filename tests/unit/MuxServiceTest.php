@@ -42,8 +42,14 @@ class MuxServiceTest extends TestCase
         $this->_mux = new Mux();
     }
 
-    public function testFirstFrameThumbnailUrlIncludesTimeZero(): void
+    public function testThumbnailUrlIsMuxsOwnThumbnail(): void
     {
+        // No `time`: Mux uses the asset's thumbnail time, else mid-video.
+        $this->assertSame(
+            'https://image.mux.com/abc123/thumbnail.jpg',
+            $this->_mux->thumbnailUrl('abc123'),
+        );
+        // Deprecated, kept for callers that want the first frame.
         $this->assertSame(
             'https://image.mux.com/abc123/thumbnail.jpg?time=0',
             $this->_mux->firstFrameThumbnailUrl('abc123'),
@@ -107,7 +113,7 @@ class MuxServiceTest extends TestCase
         $this->assertSame(1920, $mapped['width']);
         $this->assertSame(1080, $mapped['height']);
         $this->assertSame(
-            'https://image.mux.com/public_id/thumbnail.jpg?time=0',
+            'https://image.mux.com/public_id/thumbnail.jpg',
             $mapped['thumbnailUrl'],
         );
     }

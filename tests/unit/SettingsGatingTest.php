@@ -39,6 +39,154 @@ class SettingsGatingTest extends TestCase
         $this->assertTrue($settings->autoFetchPoster);
     }
 
+    public function testVideoHostingDefaultsKeepExistingSitesOnMux(): void
+    {
+        $settings = new Settings();
+
+        $this->assertSame(Settings::PROVIDER_MUX, $settings->videoProvider);
+        $this->assertNull($settings->bunnyLibraryId);
+        $this->assertNull($settings->bunnyApiKey);
+        $this->assertNull($settings->bunnyCdnHostname);
+    }
+
+    public function testPlaybackFormatsDefaultToHlsAndValidate(): void
+    {
+        if (\Yii::$app === null) {
+            new \yii\console\Application([
+                'id' => 'polymedia-tests',
+                'basePath' => dirname(__DIR__, 2),
+            ]);
+        }
+
+        $settings = new Settings();
+        $this->assertSame('hls', $settings->getDefaultPlaybackFormat('mux'));
+        $this->assertSame('hls', $settings->getDefaultPlaybackFormat('bunny'));
+        $this->assertSame('hls', $settings->getDefaultPlaybackFormat('youtube'));
+
+        $settings->bunnyDefaultPlaybackFormat = 'mp4';
+        $this->assertSame('mp4', $settings->getDefaultPlaybackFormat('bunny'));
+        $this->assertTrue($settings->validate(['muxDefaultPlaybackFormat', 'bunnyDefaultPlaybackFormat']));
+
+        $settings->muxDefaultPlaybackFormat = 'iframe';
+        $this->assertFalse($settings->validate(['muxDefaultPlaybackFormat']));
+        $this->assertSame('hls', $settings->getDefaultPlaybackFormat('mux'));
+    }
+
+    public function testRoutingIsOffByDefaultAndNeedsOrdinaryVolumes(): void
+    {
+        if (\Yii::$app === null) {
+            new \yii\console\Application([
+                'id' => 'polymedia-tests',
+                'basePath' => dirname(__DIR__, 2),
+            ]);
+        }
+
+        $settings = new Settings();
+        $this->assertFalse($settings->autoRouteVideoUploads);
+        $this->assertSame([], $settings->videoUploadVolumeUids);
+        $this->assertFalse($settings->deleteBunnyAssetOnDelete);
+        $this->assertTrue($settings->validate(['videoUploadVolumeUids']));
+
+        $settings->autoRouteVideoUploads = true;
+        $this->assertFalse($settings->validate(['videoUploadVolumeUids']));
+
+        $settings->videoUploadVolumeUids = ['video-volume'];
+        $this->assertTrue($settings->validate(['videoUploadVolumeUids']));
+
+        $settings->sidecarVolumeUid = 'video-volume';
+        $this->assertFalse($settings->validate(['videoUploadVolumeUids']));
+    }
+
+    public function testVolumesWithACustomUploaderCantBeRouted(): void
+    {
+        if (\Yii::$app === null) {
+            new \yii\console\Application([
+                'id' => 'polymedia-tests',
+                'basePath' => dirname(__DIR__, 2),
+            ]);
+        }
+
+        $volume = function(string $uid, string $name, object $fs): \craft\models\Volume {
+            $volume = $this->createMock(\craft\models\Volume::class);
+            $volume->uid = $uid;
+            $volume->name = $name;
+            $volume->method('getFs')->willReturn($fs);
+
+            return $volume;
+        };
+        $byUid = [
+            'local' => $volume('local', 'Videos', $this->createMock(\craft\base\FsInterface::class)),
+            'cloud' => $volume('cloud', 'Cloud assets', $this->createMock(\craft\fs\Local::class)),
+        ];
+        $volumes = $this->createMock(\craft\services\Volumes::class);
+        $volumes->method('getVolumeByUid')->willReturnCallback(fn(string $uid) => $byUid[$uid] ?? null);
+        \Yii::$app->set('volumes', $volumes);
+
+        // Stand in for Craft Cloud's filesystem class, which isn't installed here.
+        $settings = new class() extends Settings {
+            public const CUSTOM_UPLOADER_FS_CLASSES = [\craft\fs\Local::class];
+        };
+        $settings->autoRouteVideoUploads = true;
+
+        try {
+            $settings->videoUploadVolumeUids = ['local'];
+            $this->assertTrue($settings->validate(['videoUploadVolumeUids']));
+
+            $settings->videoUploadVolumeUids = ['local', 'cloud'];
+            $this->assertFalse($settings->validate(['videoUploadVolumeUids']));
+            $this->assertStringStartsWith('Cloud assets uses a filesystem with its own uploader', $settings->getFirstError('videoUploadVolumeUids'));
+
+            // Routing off: the selection doesn't matter yet.
+            $settings->autoRouteVideoUploads = false;
+            $this->assertTrue($settings->validate(['videoUploadVolumeUids']));
+
+            $this->assertSame(['craft\\cloud\\fs\\AssetsFs'], Settings::CUSTOM_UPLOADER_FS_CLASSES);
+        } finally {
+            \Yii::$app->clear('volumes');
+        }
+    }
+
+    public function testBunnySettingsValidation(): void
+    {
+        if (\Yii::$app === null) {
+            new \yii\console\Application([
+                'id' => 'polymedia-tests',
+                'basePath' => dirname(__DIR__, 2),
+            ]);
+        }
+
+        $attributes = ['videoProvider', 'bunnyLibraryId', 'bunnyApiKey', 'bunnyCdnHostname', 'bunnyWebhookKey'];
+        $invalid = new Settings([
+            'videoProvider' => 'vimeo',
+            'bunnyLibraryId' => '12a',
+            'bunnyApiKey' => 'literal-key',
+            'bunnyWebhookKey' => 'literal-webhook-key',
+            'bunnyCdnHostname' => 'https://vz-example.b-cdn.net/',
+        ]);
+
+        $this->assertFalse($invalid->validate($attributes));
+
+        foreach ($attributes as $attribute) {
+            $this->assertTrue($invalid->hasErrors($attribute), $attribute);
+        }
+
+        $literal = new Settings([
+            'videoProvider' => Settings::PROVIDER_BUNNY,
+            'bunnyLibraryId' => '133',
+            'bunnyApiKey' => '$BUNNY_API_KEY',
+            'bunnyCdnHostname' => 'vz-example.b-cdn.net',
+            'bunnyWebhookKey' => '$BUNNY_WEBHOOK_KEY',
+        ]);
+        $this->assertTrue($literal->validate($attributes));
+
+        // Unset references pass: another environment may define them.
+        $references = new Settings([
+            'bunnyLibraryId' => '$POLYMEDIA_TEST_UNSET_LIBRARY',
+            'bunnyCdnHostname' => '$POLYMEDIA_TEST_UNSET_HOST',
+        ]);
+        $this->assertTrue($references->validate($attributes));
+    }
+
     public function testMuxCredentialsMustUseEnvironmentReferences(): void
     {
         if (!class_exists(\Yii::class, false)) {

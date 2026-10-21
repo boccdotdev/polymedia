@@ -13,12 +13,12 @@ use PHPUnit\Framework\TestCase;
 class MuxWebhookOutcomeTest extends TestCase
 {
     /** @dataProvider outcomes */
-    public function testDeliveryOutcome(string $outcome, int $status, bool $handled): void
+    public function testDeliveryOutcome(string $outcome, int $status, bool $handled, string $type = 'video.asset.ready'): void
     {
         $previousApp = Craft::$app;
         $payload = json_encode([
-            'type' => 'video.asset.ready',
-            'data' => ['id' => 'mux-1', 'status' => 'ready'],
+            'type' => $type,
+            'data' => ['id' => 'mux-1', 'asset_id' => 'mux-1', 'status' => 'ready'],
         ]);
         $timestamp = time();
         $signature = hash_hmac('sha256', "{$timestamp}.{$payload}", 'test-secret');
@@ -39,6 +39,15 @@ class MuxWebhookOutcomeTest extends TestCase
             $mux = $this->createMock(Mux::class);
             $mux->method('getWebhookSecret')->willReturn('test-secret');
             $items = $this->createMock(MediaItems::class);
+            if (str_contains($type, 'static_rendition')) {
+                $items->method('getByMuxAssetId')->willReturn($outcome === 'unmatched' ? null : $this->createMock(MediaItemRecord::class));
+                if ($outcome === 'refresh-failure') {
+                    $mux->method('getAsset')->willThrowException(new \RuntimeException('API unavailable'));
+                } else {
+                    $mux->expects($outcome === 'unmatched' ? self::never() : self::once())->method('getAsset')
+                        ->with('mux-1')->willReturn(['assetId' => 'mux-1', 'status' => 'ready', 'mp4Renditions' => []]);
+                }
+            }
             if ($outcome === 'failure') {
                 $items->method('applyMuxAssetState')->willThrowException(new \RuntimeException('Write failed'));
             } else {
@@ -73,6 +82,10 @@ class MuxWebhookOutcomeTest extends TestCase
             'retry transient failure' => ['failure', 503, false],
             'ack unknown asset' => ['unmatched', 200, false],
             'ack applied or unchanged' => ['matched', 200, true],
+            'new rendition refresh' => ['matched', 200, true, 'video.asset.static_rendition.ready'],
+            'legacy rendition refresh' => ['matched', 200, true, 'video.asset.static_renditions.ready'],
+            'unknown rendition ignored' => ['unmatched', 200, false, 'video.asset.static_rendition.ready'],
+            'refresh failure retries' => ['refresh-failure', 503, false, 'video.asset.static_rendition.ready'],
         ];
     }
 

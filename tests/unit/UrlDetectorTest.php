@@ -67,6 +67,16 @@ class UrlDetectorTest extends TestCase
     // YouTube
     // =========================================================================
 
+    public function testPastedBunnyPlaylistIsGenericHls(): void
+    {
+        // Only library imports are `bunny` items: they carry the pinned library and video IDs.
+        $result = $this->_detector->detect('https://vz-example.b-cdn.net/657bb740-a71b-4529-a012-528021c31a92/playlist.m3u8');
+
+        $this->assertNotNull($result);
+        $this->assertSame('hls', $result->type);
+        $this->assertNotSame('bunny', $this->_detector->detect('https://vz-example.b-cdn.net/657bb740-a71b-4529-a012-528021c31a92/play_720p.mp4')?->type);
+    }
+
     public function testYouTubeWatch(): void
     {
         $result = $this->_detector->detect('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
@@ -537,6 +547,7 @@ class UrlDetectorTest extends TestCase
         $this->assertContains('dash', $types);
         $this->assertContains('shaka', $types);
         $this->assertContains('mux', $types);
+        $this->assertContains('bunny', $types);
         $this->assertContains('youtube', $types);
         $this->assertContains('vimeo', $types);
         $this->assertContains('spotify', $types);
@@ -549,6 +560,6 @@ class UrlDetectorTest extends TestCase
         $this->assertContains('videojs', $types);
         $this->assertContains('mp4', $types);
         $this->assertContains('audio', $types);
-        $this->assertCount(16, $types);
+        $this->assertCount(17, $types);
     }
 }

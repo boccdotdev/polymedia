@@ -11,8 +11,12 @@
 
 namespace boccdotdev\polymedia\models;
 
+use boccdotdev\polymedia\services\Bunny;
+use Craft;
 use craft\base\Model;
 use craft\helpers\App;
+use craft\models\Volume;
+use craft\services\Volumes;
 
 /**
  * Plugin-wide settings for Polymedia.
@@ -50,6 +54,57 @@ class Settings extends Model
      * @since 2.4.0
      */
     public const VIDEOJS_SKINS = ['default', 'neutral', 'compat'];
+
+    /**
+     * @var string Mux video hosting provider.
+     * @since 2.5.0
+     */
+    public const PROVIDER_MUX = 'mux';
+
+    /**
+     * @var string Bunny Stream video hosting provider.
+     * @since 2.5.0
+     */
+    public const PROVIDER_BUNNY = 'bunny';
+
+    /**
+     * @var string[] Every video hosting provider handle.
+     * @since 2.5.0
+     */
+    public const VIDEO_PROVIDERS = [self::PROVIDER_MUX, self::PROVIDER_BUNNY];
+
+    /**
+     * @var string HLS playback format.
+     * @since 2.5.0
+     */
+    public const FORMAT_HLS = 'hls';
+
+    /**
+     * @var string MP4 playback format.
+     * @since 2.5.0
+     */
+    public const FORMAT_MP4 = 'mp4';
+
+    /**
+     * @var string[] Every playback format handle.
+     * @since 2.5.0
+     */
+    public const PLAYBACK_FORMATS = [self::FORMAT_HLS, self::FORMAT_MP4];
+
+    /**
+     * @var string Pattern for a whole-value environment variable reference.
+     * @since 2.5.0
+     */
+    public const ENV_REFERENCE_PATTERN = '/^\$[A-Za-z_][A-Za-z0-9_]*$/D';
+
+    /**
+     * @var string[] Filesystem classes known to register their own CP uploader.
+     * Routing can't split their uploads, and refusing them in the browser would
+     * disable native uploads on every volume of that type, so they can't be
+     * selected. Craft Cloud registers `Craft.CloudUploader` for its assets fs.
+     * @since 2.5.0
+     */
+    public const CUSTOM_UPLOADER_FS_CLASSES = ['craft\\cloud\\fs\\AssetsFs'];
 
     // Public Properties
     // =========================================================================
@@ -130,7 +185,7 @@ class Settings extends Model
 
     /**
      * @var bool Download derived thumbnail as poster on URL asset creation when no user poster is set.
-     * Mux library imports always attempt a first-frame poster regardless of this setting.
+     * Mux library imports always attempt a poster regardless of this setting.
      * @since 1.0.0
      */
     public bool $autoFetchPoster = true;
@@ -187,6 +242,78 @@ class Settings extends Model
      */
     public ?string $muxWebhookSecret = null;
 
+    /**
+     * @var string Hosting provider for new library imports and uploads, `mux`
+     * or `bunny`. Existing assets keep their own provider when this changes.
+     * @since 2.5.0
+     */
+    public string $videoProvider = self::PROVIDER_MUX;
+
+    /**
+     * @var string Preferred playback format for Mux assets, `hls` or `mp4`.
+     * MP4 plays the highest ready static rendition and falls back to HLS.
+     * @since 2.5.0
+     */
+    public string $muxDefaultPlaybackFormat = self::FORMAT_HLS;
+
+    /**
+     * @var string Preferred playback format for Bunny Stream assets, `hls` or
+     * `mp4`. MP4 plays the highest verified MP4 file and falls back to HLS.
+     * @since 2.5.0
+     */
+    public string $bunnyDefaultPlaybackFormat = self::FORMAT_HLS;
+
+    /**
+     * @var ?string Bunny Stream library ID. Supports env syntax (`$BUNNY_LIBRARY_ID`).
+     * @since 2.5.0
+     */
+    public ?string $bunnyLibraryId = null;
+
+    /**
+     * @var ?string Environment reference for the Bunny Stream library's write
+     * API key (`$BUNNY_API_KEY`). Literal keys are rejected.
+     * @since 2.5.0
+     */
+    public ?string $bunnyApiKey = null;
+
+    /**
+     * @var ?string Native Bunny delivery hostname such as `vz-example.b-cdn.net`,
+     * without a scheme or path. Supports env syntax (`$BUNNY_CDN_HOSTNAME`).
+     * @since 2.5.0
+     */
+    public ?string $bunnyCdnHostname = null;
+
+    /**
+     * @var ?string Environment reference for the library's read-only API key,
+     * which Bunny uses to sign webhooks (`$BUNNY_WEBHOOK_KEY`). When empty, the
+     * webhook endpoint is disabled.
+     * @since 2.5.0
+     */
+    public ?string $bunnyWebhookKey = null;
+
+    /**
+     * @var bool When true, hard-deleting a Bunny `.pmedia` also deletes the video
+     * from its Bunny library. Requires Pro and credentials for that library.
+     * Default off; trashing never deletes the video.
+     * @since 2.5.0
+     */
+    public bool $deleteBunnyAssetOnDelete = false;
+
+    /**
+     * @var bool Pro opt-in: route new MP4 uploads from Craft's standard
+     * uploader to the selected provider, for the volumes in
+     * {@see $videoUploadVolumeUids}. Never implied by configuring a provider.
+     * @since 2.5.0
+     */
+    public bool $autoRouteVideoUploads = false;
+
+    /**
+     * @var string[] UIDs of the volumes whose new MP4 uploads are routed. An
+     * empty list routes nothing; the sidecar volume can't be included.
+     * @since 2.5.0
+     */
+    public array $videoUploadVolumeUids = [];
+
     // Public Methods
     // =========================================================================
 
@@ -235,6 +362,116 @@ class Settings extends Model
     }
 
     /**
+     * Returns a hosting provider's default playback format.
+     *
+     * @param string $provider `mux` or `bunny`
+     * @return string `hls` or `mp4`; `hls` for any other provider
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function getDefaultPlaybackFormat(string $provider): string
+    {
+        $format = match ($provider) {
+            self::PROVIDER_MUX => $this->muxDefaultPlaybackFormat,
+            self::PROVIDER_BUNNY => $this->bunnyDefaultPlaybackFormat,
+            default => self::FORMAT_HLS,
+        };
+
+        return $format === self::FORMAT_MP4 ? self::FORMAT_MP4 : self::FORMAT_HLS;
+    }
+
+    /**
+     * Validates a literal (or resolved) Bunny library ID or delivery hostname.
+     *
+     * Environment references that are unset here pass, because another
+     * environment may define them.
+     *
+     * @param string $attribute `bunnyLibraryId` or `bunnyCdnHostname`
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function validateBunnyConnection(string $attribute): void
+    {
+        $value = App::parseEnv((string)$this->$attribute);
+
+        if ($value === null || $value === '' || is_bool($value)) {
+            return;
+        }
+
+        try {
+            match ($attribute) {
+                'bunnyLibraryId' => Bunny::validateLibraryId(trim($value)),
+                default => Bunny::validateHostname(strtolower(trim($value))),
+            };
+        } catch (\InvalidArgumentException $e) {
+            $this->addError($attribute, $e->getMessage());
+        }
+    }
+
+    /**
+     * Validates the automatic video upload volumes: at least one when routing
+     * is on, never the sidecar volume, and none whose filesystem is known to
+     * use its own uploader.
+     *
+     * @param string $attribute `videoUploadVolumeUids`
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function validateVideoUploadVolumes(string $attribute): void
+    {
+        if ($this->autoRouteVideoUploads && $this->videoUploadVolumeUids === []) {
+            $this->addError($attribute, 'Select at least one volume for automatic video uploads.');
+        }
+
+        if ($this->sidecarVolumeUid && in_array($this->sidecarVolumeUid, $this->videoUploadVolumeUids, true)) {
+            $this->addError($attribute, 'The sidecar volume cannot be used for automatic video uploads.');
+        }
+
+        $volumes = Craft::$app->get('volumes', false);
+
+        if (!$this->autoRouteVideoUploads || !$volumes instanceof Volumes) {
+            return;
+        }
+
+        foreach ($this->videoUploadVolumeUids as $uid) {
+            $volume = $volumes->getVolumeByUid((string)$uid);
+
+            if ($volume && self::usesCustomUploader($volume)) {
+                $this->addError($attribute, "{$volume->name} uses a filesystem with its own uploader, such as Craft Cloud's, so its MP4 uploads can't be routed. Use Upload video for it instead.");
+            }
+        }
+    }
+
+    /**
+     * Returns whether a volume's filesystem is known to use its own CP uploader.
+     *
+     * @param Volume $volume the volume
+     * @return bool
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public static function usesCustomUploader(Volume $volume): bool
+    {
+        try {
+            $fs = $volume->getFs();
+        } catch (\Throwable) {
+            return false;
+        }
+
+        foreach (static::CUSTOM_UPLOADER_FS_CLASSES as $class) {
+            if (is_a($fs, $class)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * @inheritdoc
      */
     protected function defineRules(): array
@@ -258,6 +495,19 @@ class Settings extends Model
             'skipOnEmpty' => true,
             'message' => 'Use an environment variable reference such as `$MUX_TOKEN_ID`. Literal credentials cannot be saved to project config.',
         ];
+        $rules[] = [['bunnyLibraryId', 'bunnyApiKey', 'bunnyCdnHostname', 'bunnyWebhookKey'], 'string'];
+        $rules[] = [
+            ['bunnyApiKey', 'bunnyWebhookKey'],
+            'match',
+            'pattern' => self::ENV_REFERENCE_PATTERN,
+            'skipOnEmpty' => true,
+            'message' => 'Use an environment variable reference such as `$BUNNY_API_KEY`. Literal credentials cannot be saved to project config.',
+        ];
+        $rules[] = [['bunnyLibraryId', 'bunnyCdnHostname'], 'validateBunnyConnection'];
+        $rules[] = [['videoProvider'], 'in', 'range' => self::VIDEO_PROVIDERS];
+        $rules[] = [['muxDefaultPlaybackFormat', 'bunnyDefaultPlaybackFormat'], 'in', 'range' => self::PLAYBACK_FORMATS];
+        $rules[] = [['videoUploadVolumeUids'], 'each', 'rule' => ['string', 'max' => 36]];
+        $rules[] = [['videoUploadVolumeUids'], 'validateVideoUploadVolumes', 'skipOnEmpty' => false];
         $rules[] = [['selfHostBaseUrl'], 'string'];
         $rules[] = [['defaultVolumeUid', 'attachmentsVolumeUid', 'sidecarVolumeUid'], 'string', 'max' => 36];
         $rules[] = [
@@ -280,6 +530,8 @@ class Settings extends Model
                 'autoFetchPoster',
                 'warnOnSignedUrlInPublicVolume',
                 'deleteMuxAssetOnDelete',
+                'deleteBunnyAssetOnDelete',
+                'autoRouteVideoUploads',
             ],
             'boolean',
         ];

@@ -14,6 +14,7 @@ namespace boccdotdev\polymedia\services;
 use boccdotdev\polymedia\base\PlayerEngineInterface;
 use boccdotdev\polymedia\engines\MediaChrome;
 use boccdotdev\polymedia\engines\VideoJs;
+use boccdotdev\polymedia\helpers\PlaybackSources;
 use boccdotdev\polymedia\models\PlayerSettings;
 use boccdotdev\polymedia\models\RenderContext;
 use boccdotdev\polymedia\models\Settings;
@@ -45,6 +46,11 @@ class Renderer extends Component
      */
     private const AUDIO_TYPES = ['audio', 'spotify'];
 
+    /**
+     * @var string[] Types whose source the Renderer resolves.
+     */
+    private const SOURCE_TYPES = ['mux', 'bunny', 'mp4'];
+
     // Private Properties
     // =========================================================================
 
@@ -60,7 +66,8 @@ class Renderer extends Component
      * Renders a full player for a polymedia asset.
      *
      * @param Asset $asset the `.pmedia` asset
-     * @param array $options rendering options (overrides for player settings, poster, children, etc.)
+     * @param array $options rendering options (overrides for player settings, poster, children,
+     *        `playbackFormat` for Mux/Bunny items, etc.)
      * @return Markup the rendered HTML
      * @throws SiteNotFoundException if tracks or the player locale need the current site and there is none
      *
@@ -82,7 +89,7 @@ class Renderer extends Component
      * Renders just the media element, without the player wrapper.
      *
      * @param Asset $asset the `.pmedia` asset
-     * @param array $options rendering options
+     * @param array $options rendering options, including `playbackFormat`
      * @return Markup the rendered HTML
      *
      * @author boccdotdev
@@ -115,10 +122,17 @@ class Renderer extends Component
         }
 
         try {
-            return Plugin::getInstance()->getManifestWriter()->read($asset);
+            $manifest = Plugin::getInstance()->getManifestWriter()->read($asset);
         } catch (\Throwable) {
             return [];
         }
+
+        // A reference plays its source's current URL, or nothing once it's gone.
+        if (SourceAssets::isReference($manifest)) {
+            $manifest['url'] = Plugin::getInstance()->getSourceAssets()->resolveUrl($manifest) ?? '';
+        }
+
+        return $manifest;
     }
 
     /**
@@ -181,7 +195,7 @@ class Renderer extends Component
      * Renders `<script type="module">` tags for the player and provider elements.
      *
      * @param array $opts options: `providers`, `version`, `mode`; with Video.js
-     *        also `skins` and `locale`
+     *        also `skins` and `locale`. A list is shorthand for `providers`.
      * @return Markup the script tags
      * @throws SiteNotFoundException if the Video.js locale needs the current site and there is none
      *
@@ -190,6 +204,11 @@ class Renderer extends Component
      */
     public function scripts(array $opts = []): Markup
     {
+        // `scripts(['mux', 'bunny'])` is shorthand for the providers option.
+        if ($opts !== [] && array_is_list($opts)) {
+            $opts = ['providers' => $opts];
+        }
+
         $settings = Plugin::getInstance()->getSettings();
         $mode = $opts['mode'] ?? $settings->scriptLoaderMode;
 
@@ -302,21 +321,58 @@ class Renderer extends Component
             return null;
         }
 
-        $record = Plugin::getInstance()->getMediaItems()->getByAssetId($asset->id);
+        $plugin = Plugin::getInstance();
         $type = $manifest['type'] ?? '';
-        $elementMap = Plugin::getInstance()->getUrlDetector()->getElementMap();
+        $source = PlaybackSources::resolve($manifest, $plugin->getSettings(), $options);
+
+        // Nothing playable, e.g. a deleted hosted video.
+        if ($source['url'] === '') {
+            return null;
+        }
+
+        $record = $plugin->getMediaItems()->getByAssetId($asset->id);
+        $elementMap = $plugin->getUrlDetector()->getElementMap();
 
         return new RenderContext([
             'manifest' => $manifest,
             'type' => $type,
-            'elementTag' => ($record ? $record->element : null) ?? $elementMap[$type] ?? 'video',
+            'elementTag' => $source['element'] ?? ($record ? $record->element : null) ?? $elementMap[$type] ?? 'video',
+            'src' => $source['url'],
+            'format' => $source['format'],
             'isAudio' => in_array($type, self::AUDIO_TYPES, true),
             'settings' => $this->_mergeOptions($this->_resolveDefaults($record), $options),
             'poster' => $this->_resolvePoster($record, $manifest, $options),
             'tracks' => $withTracks ? $this->_resolveTracks($record, $options) : [],
             'aspectRatio' => $this->_aspectRatio($manifest),
-            'options' => $options,
+            'options' => $this->_sourceSafeOptions($type, $options),
         ]);
+    }
+
+    /**
+     * Drops media attributes that would replace a resolved source.
+     *
+     * For hosted and file items the plugin owns the source, so a template's
+     * `mediaAttrs` can't swap the URL, playback ID or MIME type under it.
+     *
+     * @param string $type the provider type
+     * @param array $options rendering options
+     * @return array
+     */
+    private function _sourceSafeOptions(string $type, array $options): array
+    {
+        if (!isset($options['mediaAttrs']) || !is_array($options['mediaAttrs'])
+            || !in_array($type, self::SOURCE_TYPES, true)
+        ) {
+            return $options;
+        }
+
+        $options['mediaAttrs'] = array_filter(
+            $options['mediaAttrs'],
+            static fn(mixed $key): bool => !in_array(strtolower((string)$key), ['src', 'playback-id', 'type'], true),
+            ARRAY_FILTER_USE_KEY,
+        );
+
+        return $options;
     }
 
     /**

@@ -32,12 +32,42 @@
     });
   }
 
+  // Select inputs fire no init event. Assets fields that offer video or audio
+  // render their menu config beside the input instead (FieldMedia::getMenu()).
+  if (Craft.AssetSelectInput) {
+    var initAssetSelectInput = Craft.AssetSelectInput.prototype.init;
+    Craft.AssetSelectInput.prototype.init = function () {
+      initAssetSelectInput.apply(this, arguments);
+      Craft.Polymedia.initFieldButton(this);
+    };
+  }
+
+  /*
+   * Every Add video or audio item opens with a destination, which says where
+   * the new or reused `.pmedia` goes and what happens to it:
+   *
+   * - `folderId`, `siteId`, `fieldId`, `elementId`: sent to the server, which
+   *   authorizes them again;
+   * - `selects`: whether the result is selected into a field;
+   * - `canAccept()`: whether the field can still take an item;
+   * - `finish(assetId)`: selects the asset or refreshes the index, and
+   *   resolves false to keep the dialog open.
+   */
   Craft.Polymedia = {
-    // Set from PHP via window.CraftPolymediaConfig (Pro + Mux credentials).
-    muxEnabled: !!(
-      window.CraftPolymediaConfig && window.CraftPolymediaConfig.muxEnabled
-    ),
+    // Set from PHP. These flags control presentation, never authorization.
     isPro: !!(window.CraftPolymediaConfig && window.CraftPolymediaConfig.isPro),
+    videoProvider: (window.CraftPolymediaConfig || {}).videoProvider || 'mux',
+    videoEnabled: !!(window.CraftPolymediaConfig || {}).videoEnabled,
+
+    /**
+     * Returns the selected hosting provider's controller action.
+     *
+     * @param {string} action e.g. `library`
+     * @returns {string}
+     */
+    videoAction: function (action) {
+      return 'polymedia/' + Craft.Polymedia.videoProvider + '/' + action;
+    },
 
     init: function () {
       // Catches indexes created after this runs, e.g. asset selection modals.
@@ -52,34 +82,89 @@
       }
     },
 
+    /**
+     * Returns the Add video or audio items, in menu order.
+     *
+     * @param {?string[]} allowed the item keys a field offers, or null for all
+     * @returns {Array<{key: string, label: string, description: string, open: string}>}
+     */
+    menuItems: function (allowed) {
+      var items = [
+        {
+          key: 'url',
+          label: Craft.t('polymedia', 'From URL'),
+          description: Craft.t(
+            'polymedia',
+            'Paste a YouTube, Vimeo, HLS, or other media URL'
+          ),
+          open: 'openSlideout',
+        },
+        {
+          key: 'existing',
+          label: Craft.t('polymedia', 'From existing asset'),
+          description: Craft.t(
+            'polymedia',
+            'Use a video asset without changing the original file'
+          ),
+          open: 'openSourceAsset',
+        },
+      ];
+
+      if (Craft.Polymedia.videoEnabled) {
+        items.push(
+          {
+            key: 'library',
+            label: Craft.t('polymedia', 'Browse video library'),
+            description: Craft.t(
+              'polymedia',
+              'Import a video from your video library'
+            ),
+            open: 'openVideoBrowse',
+          },
+          {
+            key: 'upload',
+            label: Craft.t('polymedia', 'Upload video'),
+            description: Craft.t(
+              'polymedia',
+              'Upload a video file to your video library'
+            ),
+            open: 'openVideoUpload',
+          }
+        );
+      }
+
+      return items.filter(function (item) {
+        return !allowed || allowed.indexOf(item.key) !== -1;
+      });
+    },
+
     injectButton: function (assetIndex) {
       if (!assetIndex || assetIndex._polymediaBtnInjected) {
         return;
       }
 
-      // Single disclosure: Add media → From URL / Mux browse / Mux upload.
-      // Craft’s “Upload files” stays separate (volume file upload).
-      // Items are built via Garnish.DisclosureMenu#addItem so activate handlers
-      // are wired the same way as native CP menus (delegated activate fails).
-      var menuId =
-        'polymedia-add-media-' + Math.floor(Math.random() * 1000000);
+      assetIndex._polymediaBtnInjected = true;
 
-      var $btn = $(
-        '<button type="button" class="btn menubtn add icon polymedia-add-media-btn" ' +
-          'data-disclosure-trigger aria-controls="' +
-          menuId +
-          '" aria-haspopup="true">' +
-          Craft.escapeHtml(Craft.t('polymedia', 'Add media')) +
-          '</button>'
-      );
+      var items = Craft.Polymedia._indexMenuItems(assetIndex);
 
-      var $menu = $(
-        '<div id="' +
-          menuId +
-          '" class="menu menu--disclosure"><ul></ul></div>'
-      );
+      if (!items || !items.length) {
+        return;
+      }
+
+      // Single disclosure beside Craft’s “Upload files” (volume file upload).
+      var menu = Craft.Polymedia._createMenuButton('polymedia-add-media-btn');
+      var $btn = menu.$btn;
+      var $menu = menu.$menu;
+      var getDestination = function () {
+        return Promise.resolve(Craft.Polymedia.indexDestination(assetIndex));
+      };
 
       var place = function () {
+        // Native video routing reads the index's destination from its uploader.
+        if (assetIndex.$uploadButton) {
+          assetIndex.$uploadButton.data('polymediaIndex', assetIndex);
+        }
+
         if (assetIndex.settings && assetIndex.settings.context === 'index') {
           // Assets index: immediately before Craft’s Upload files button.
           var $upload = assetIndex.$uploadButton;
@@ -114,29 +199,164 @@
 
         // Menu lives on body once DisclosureMenu inits; keep a sibling for first init.
         if (!$menu.data('disclosureMenu') && !$menu.parent().length) {
-          $btn.after($menu);
-          $btn.disclosureMenu();
-          Craft.Polymedia._populateAddMediaMenu($menu, assetIndex);
+          Craft.Polymedia._initMenu($btn, $menu, items, getDestination);
         }
       };
 
       place();
 
-      if (assetIndex.settings && assetIndex.settings.context === 'index') {
-        // Craft rebuilds the upload button on source change — re-place ours.
+      if (typeof assetIndex.on === 'function') {
+        // Craft rebuilds the upload button on source change, in indexes and pickers.
         assetIndex.on('selectSource', place);
       }
-
-      assetIndex._polymediaBtnInjected = true;
     },
 
     /**
-     * Fills the Add media disclosure with native DisclosureMenu items.
+     * Returns the items an index offers, or null for none.
+     *
+     * A field's picker follows its field: the field's own items when it
+     * offers video or audio, and none when it can't hold `.pmedia` assets.
+     * Selector modals without a field, such as From existing asset's, have
+     * nothing to select into and get no menu.
+     *
+     * @param {Craft.AssetIndex} assetIndex
+     * @returns {?Array}
+     */
+    _indexMenuItems: function (assetIndex) {
+      if (!Craft.Polymedia.isFieldPicker(assetIndex)) {
+        return Craft.Polymedia.menuItems(null);
+      }
+
+      var input = assetIndex.settings.modal.settings.polymediaInput;
+
+      if (!input || !input.settings) {
+        return null;
+      }
+
+      if (input._polymediaFieldMedia) {
+        return Craft.Polymedia.menuItems(input._polymediaFieldMedia.items || []);
+      }
+
+      var kinds = input.settings.criteria && input.settings.criteria.kind;
+
+      if (kinds && kinds.length && Array.from(kinds).indexOf('polymedia') === -1) {
+        return null;
+      }
+
+      return Craft.Polymedia.menuItems(null);
+    },
+
+    /**
+     * Adds the Add video or audio menu after a field's Add an asset button,
+     * when the server rendered the field's menu.
+     *
+     * @param {Craft.AssetSelectInput} input
+     */
+    initFieldButton: function (input) {
+      if (!input || !input.$container || input._polymediaFieldMedia) {
+        return;
+      }
+
+      // The server renders it right after the field's own input.
+      var $marker = input.$container.next('[data-polymedia-field-media]');
+      var config = $marker.length ? $marker.data('polymediaFieldMedia') : null;
+
+      if (
+        !config ||
+        typeof config !== 'object' ||
+        Number(config.fieldId) !== Number(input.settings.fieldId)
+      ) {
+        return;
+      }
+
+      // The field's picker offers the same items.
+      input._polymediaFieldMedia = config;
+
+      var items = Craft.Polymedia.menuItems(config.items || []);
+      var $addBtn = input.$addElementBtn;
+
+      if (
+        !config.canAdd ||
+        !items.length ||
+        !input.settings.fieldId ||
+        !$addBtn ||
+        !$addBtn.length ||
+        $addBtn.prop('disabled')
+      ) {
+        return;
+      }
+
+      var menu = Craft.Polymedia._createMenuButton('dashed polymedia-field-media-btn');
+      // Between Add an asset and Upload a file. Upload a file opens the file
+      // input that follows it, so nothing may go after it.
+      menu.$btn.insertAfter($addBtn);
+      Craft.Polymedia._initMenu(menu.$btn, menu.$menu, items, function () {
+        return Craft.Polymedia.fieldDestination(input);
+      });
+
+      // Hide and show with Craft's own buttons as the field fills and empties.
+      ['enableAddElementsBtn', 'disableAddElementsBtn'].forEach(function (method) {
+        var original = input[method];
+        input[method] = function () {
+          menu.$btn.toggleClass('hidden', method === 'disableAddElementsBtn');
+          return original.apply(this, arguments);
+        };
+      });
+      input.updateAddElementsBtn();
+    },
+
+    /**
+     * Returns an Add video or audio disclosure button and its menu.
+     *
+     * @param {string} classes extra button classes
+     * @returns {{$btn: jQuery, $menu: jQuery}}
+     */
+    _createMenuButton: function (classes) {
+      var menuId =
+        'polymedia-add-media-' + Math.floor(Math.random() * 1000000);
+
+      return {
+        $btn: $(
+          '<button type="button" class="btn menubtn add icon ' +
+            classes +
+            '" data-disclosure-trigger aria-controls="' +
+            menuId +
+            '" aria-haspopup="true">' +
+            Craft.escapeHtml(Craft.t('polymedia', 'Add video or audio')) +
+            '</button>'
+        ),
+        $menu: $(
+          '<div id="' +
+            menuId +
+            '" class="menu menu--disclosure"><ul></ul></div>'
+        ),
+      };
+    },
+
+    /**
+     * Wires a placed button to its menu. The menu moves to `<body>`.
+     *
+     * @param {jQuery} $btn
+     * @param {jQuery} $menu
+     * @param {Array} items from menuItems()
+     * @param {function(): Promise<?Object>} getDestination
+     */
+    _initMenu: function ($btn, $menu, items, getDestination) {
+      $btn.after($menu);
+      $btn.disclosureMenu();
+      Craft.Polymedia._populateAddMediaMenu($menu, items, getDestination);
+    },
+
+    /**
+     * Fills the Add video or audio disclosure with native DisclosureMenu
+     * items, so activate handlers are wired the same way as native CP menus
+     * (delegated activate fails).
      *
      * @param {jQuery} $menu
-     * @param {Craft.AssetIndex} assetIndex
+     * @param {Array} items from menuItems()
+     * @param {function(): Promise<?Object>} getDestination
      */
-    _populateAddMediaMenu: function ($menu, assetIndex) {
+    _populateAddMediaMenu: function ($menu, items, getDestination) {
       var disclosure = $menu.data('disclosureMenu');
 
       if (!disclosure || typeof disclosure.addItem !== 'function') {
@@ -146,50 +366,59 @@
       // Empty the placeholder list before adding wired items.
       $menu.children('ul').empty();
 
-      disclosure.addItem({
-        label: Craft.t('polymedia', 'From URL'),
-        description: Craft.t(
-          'polymedia',
-          'Paste a YouTube, Vimeo, Mux, HLS, or other media URL'
-        ),
-        onActivate: function () {
-          Craft.Polymedia.openSlideout(assetIndex);
-        },
-      });
-
-      if (!Craft.Polymedia.muxEnabled) {
-        return;
-      }
-
-      disclosure.addItem({
-        label: Craft.t('polymedia', 'Browse Mux library'),
-        description: Craft.t(
-          'polymedia',
-          'Import a video already in your Mux account'
-        ),
-        onActivate: function () {
-          Craft.Polymedia.openMuxBrowse(assetIndex);
-        },
-      });
-
-      disclosure.addItem({
-        label: Craft.t('polymedia', 'Upload to Mux'),
-        description: Craft.t(
-          'polymedia',
-          'Upload a video file directly to Mux'
-        ),
-        onActivate: function () {
-          Craft.Polymedia.openMuxUpload(assetIndex);
-        },
+      items.forEach(function (item) {
+        disclosure.addItem({
+          label: item.label,
+          description: item.description,
+          onActivate: function () {
+            Craft.Polymedia.open(item, getDestination);
+          },
+        });
       });
     },
 
-    openSlideout: function (assetIndex) {
-      var params = {};
-      var folderId = Craft.Polymedia._folderId(assetIndex);
+    /**
+     * Resolves the destination, then opens an item's dialog.
+     *
+     * @param {{open: string}} item from menuItems()
+     * @param {function(): Promise<?Object>} getDestination
+     * @returns {Promise<void>}
+     */
+    open: async function (item, getDestination) {
+      var destination;
 
-      if (folderId) {
-        params.folderId = folderId;
+      try {
+        destination = await getDestination();
+      } catch (error) {
+        Craft.cp.displayError(Craft.Polymedia._errorMessage(
+          error,
+          Craft.t('polymedia', 'Could not add video or audio.')
+        ));
+        return;
+      }
+
+      if (destination) {
+        Craft.Polymedia[item.open](destination);
+      }
+    },
+
+    _errorMessage: function (error, fallback) {
+      return (
+        (error && error.response && error.response.data && error.response.data.message) ||
+        fallback
+      );
+    },
+
+    openSlideout: function (destination) {
+      var params = {};
+
+      if (destination.folderId) {
+        params.folderId = destination.folderId;
+      }
+
+      // Narrows the offered types to the field's allowed providers.
+      if (destination.fieldId) {
+        params.fieldId = destination.fieldId;
       }
 
       var slideout = new Craft.CpScreenSlideout(
@@ -203,32 +432,181 @@
             ? ev.response.data.assetId
             : null;
 
-        if (await Craft.Polymedia.finishSelection(assetIndex, assetId)) {
+        if (await destination.finish(assetId)) {
           Craft.cp.displayNotice(Craft.t('polymedia', 'Media item created.'));
         }
       });
     },
 
-    openMuxBrowse: function (assetIndex) {
-      if (!Craft.Polymedia.muxEnabled) {
+    openVideoBrowse: function (destination) {
+      if (!Craft.Polymedia.videoEnabled) {
         return;
       }
 
-      new Craft.Polymedia.MuxBrowseModal({
-        assetIndex: assetIndex,
-        folderId: Craft.Polymedia._folderId(assetIndex),
+      new Craft.Polymedia.VideoBrowseModal({ destination: destination });
+    },
+
+    openVideoUpload: function (destination) {
+      if (!Craft.Polymedia.videoEnabled) {
+        return;
+      }
+
+      new Craft.Polymedia.VideoUploadModal({ destination: destination });
+    },
+
+    /**
+     * Picks a Craft video and wraps it in a `.pmedia` reference.
+     *
+     * @param {Object} destination
+     */
+    openSourceAsset: function (destination) {
+      Craft.createElementSelectorModal('craft\\elements\\Asset', {
+        multiSelect: false,
+        criteria: { kind: 'video', siteId: destination.siteId || Craft.siteId },
+        onSelect: async function (elements) {
+          if (!elements || !elements.length) {
+            return;
+          }
+
+          try {
+            var response = await Craft.sendActionRequest('POST', 'polymedia/source-assets/import', {
+              data: {
+                sourceAssetId: elements[0].id,
+                folderId: destination.folderId,
+              },
+            });
+
+            if (await destination.finish(response.data.assetId)) {
+              Craft.cp.displayNotice(Craft.t('polymedia', 'Media item created.'));
+            }
+          } catch (error) {
+            Craft.cp.displayError(Craft.Polymedia._errorMessage(
+              error,
+              Craft.t('polymedia', 'Could not create media item.')
+            ));
+          }
+        },
       });
     },
 
-    openMuxUpload: function (assetIndex) {
-      if (!Craft.Polymedia.muxEnabled) {
-        return;
+    /**
+     * Returns the destination for an Assets index or field picker: the
+     * folder being browsed, selected into the picker's field if any.
+     *
+     * @param {?Craft.AssetIndex} assetIndex
+     * @returns {Object}
+     */
+    indexDestination: function (assetIndex) {
+      return Object.assign(Craft.Polymedia.uploadContext(assetIndex), {
+        selects: Craft.Polymedia.isFieldPicker(assetIndex),
+        canAccept: function () {
+          return Craft.Polymedia._pickerCanAccept(assetIndex);
+        },
+        finish: function (assetId) {
+          return Craft.Polymedia.finishSelection(assetIndex, assetId);
+        },
+      });
+    },
+
+    /**
+     * Resolves a field's destination: its upload location for the element
+     * being edited, as the server resolves and authorizes it.
+     *
+     * @param {Craft.AssetSelectInput} input
+     * @returns {Promise<?Object>} null while the field is full or busy
+     */
+    fieldDestination: async function (input) {
+      if (input._polymediaResolving || !Craft.Polymedia._fieldCanAccept(input)) {
+        return null;
       }
 
-      new Craft.Polymedia.MuxUploadModal({
-        assetIndex: assetIndex,
+      input._polymediaResolving = true;
+
+      try {
+        // Someone who can't save the entry itself edits it through a draft,
+        // which Craft only creates on their first change. Create it now.
+        var editor = input.elementEditor;
+        if (
+          editor &&
+          editor.settings &&
+          !editor.settings.canSaveCanonical &&
+          typeof editor.ensureIsDraftOrRevision === 'function'
+        ) {
+          await editor.ensureIsDraftOrRevision();
+        }
+
+        var context = Craft.Polymedia.fieldContext(input);
+        var response = await Craft.sendActionRequest('POST', 'polymedia/field-media/destination', {
+          data: context,
+        });
+
+        return Object.assign({}, context, {
+          folderId: response.data.folderId,
+          selects: true,
+          canAccept: function () {
+            return Craft.Polymedia._fieldCanAccept(input);
+          },
+          finish: function (assetId) {
+            return Craft.Polymedia.finishFieldSelection(input, assetId);
+          },
+        });
+      } finally {
+        input._polymediaResolving = false;
+      }
+    },
+
+    /**
+     * Returns the field, element and site a field's input edits.
+     *
+     * The element editor may have swapped the element for a draft since the
+     * field rendered.
+     *
+     * @param {Craft.BaseElementSelectInput} input
+     * @returns {{fieldId: number, elementId: ?number, siteId: number}}
+     */
+    fieldContext: function (input) {
+      var settings = input.settings || {};
+      var elementId = settings.sourceElementId || null;
+
+      if (elementId && input.elementEditor && typeof input.elementEditor.getDraftElementId === 'function') {
+        elementId = input.elementEditor.getDraftElementId(elementId) || elementId;
+      }
+
+      return {
+        fieldId: settings.fieldId,
+        elementId: elementId,
+        siteId: settings.referenceElementSiteId || Craft.Polymedia._targetSiteId(input),
+      };
+    },
+
+    // The site the field relates its assets in.
+    _targetSiteId: function (input) {
+      return (input.settings && input.settings.criteria && input.settings.criteria.siteId) || Craft.siteId;
+    },
+
+    /**
+     * Returns the upload destination context for preflight: the folder, and
+     * the field and element when opened from a field's asset picker.
+     *
+     * @param {?Craft.AssetIndex} assetIndex
+     * @returns {Object}
+     */
+    uploadContext: function (assetIndex) {
+      var context = {
         folderId: Craft.Polymedia._folderId(assetIndex),
-      });
+        siteId: (assetIndex && assetIndex.siteId) || Craft.siteId,
+      };
+
+      if (Craft.Polymedia.isFieldPicker(assetIndex)) {
+        var input = assetIndex.settings.modal.settings.polymediaInput;
+
+        if (input && input.settings && input.settings.fieldId) {
+          // The same field, element and site as the field's own menu.
+          Object.assign(context, Craft.Polymedia.fieldContext(input));
+        }
+      }
+
+      return context;
     },
 
     _folderId: function (assetIndex) {
@@ -259,6 +637,27 @@
         assetIndex.settings.modal &&
         typeof assetIndex.settings.modal.selectElements === 'function'
       );
+    },
+
+    // Whether the picker's field can take another item, or replace one.
+    _pickerCanAccept: function (assetIndex) {
+      if (!Craft.Polymedia.isFieldPicker(assetIndex)) {
+        return true;
+      }
+
+      var modal = assetIndex.settings.modal;
+      var input = modal.settings.polymediaInput;
+      var replacing = input && input._$replaceElement &&
+        input.getSelectedElementIds().some(function (id) {
+          return Number(id) === Number(input._$replaceElement.data('id'));
+        });
+
+      return !!input && input.modal === modal && (replacing || input.canAddMoreElements());
+    },
+
+    // Whether a field can take another item from its own menu.
+    _fieldCanAccept: function (input) {
+      return !input._$replaceElement && input.canAddMoreElements();
     },
 
     /**
@@ -401,21 +800,80 @@
       }
     },
 
-    // Native onModalSelect removes the replacement before requesting its new
-    // HTML. Prepare everything first so a failed request cannot erase a value.
-    _replaceIntoField: async function (input, modal, id, siteId, canSelect) {
-      var $oldElement = input._$replaceElement;
+    /**
+     * Selects an asset into a field's input without opening its picker.
+     *
+     * The server checks the field's rules for the element being edited, then
+     * the input adds the asset the way its picker would.
+     *
+     * @param {Craft.AssetSelectInput} input
+     * @param {?number} assetId the Craft asset id to select
+     * @returns {Promise<boolean>} whether the asset was selected
+     */
+    selectIntoInput: async function (input, assetId) {
+      var id = Number(assetId);
+
+      if (!Number.isSafeInteger(id) || id <= 0 || input._polymediaSelecting) {
+        return false;
+      }
+
+      var canSelect = function () {
+        return (
+          Craft.Polymedia._fieldCanAccept(input) &&
+          !input.getDisabledElementIds().some(function (disabledId) {
+            return Number(disabledId) === id;
+          })
+        );
+      };
+
+      if (!canSelect()) {
+        return false;
+      }
+
+      input._polymediaSelecting = true;
+      try {
+        var response = await Craft.sendActionRequest('POST', 'polymedia/field-media/check', {
+          data: Object.assign(Craft.Polymedia.fieldContext(input), { assetId: id }),
+        });
+
+        // State may have changed while the eligibility request was in flight.
+        if (response.data.selectable !== true || !canSelect()) {
+          return false;
+        }
+
+        // One draft save for the whole selection, as with the picker.
+        if (input.elementEditor) {
+          input.elementEditor.pause();
+        }
+        try {
+          var element = await Craft.Polymedia._renderFieldElement(
+            input, id, Craft.Polymedia._targetSiteId(input)
+          );
+          if (!canSelect()) {
+            return false;
+          }
+          await input.selectElements([element]);
+          input.updateDisabledElementsInModal();
+        } finally {
+          if (input.elementEditor) {
+            input.elementEditor.resume();
+          }
+        }
+
+        return input.getSelectedElementIds().some(function (selectedId) {
+          return Number(selectedId) === id;
+        });
+      } finally {
+        input._polymediaSelecting = false;
+      }
+    },
+
+    // Renders an asset the way the input shows its elements and loads what
+    // it needs, before anything changes the field value.
+    _renderFieldElement: async function (input, id, siteId) {
       var viewMode = input.settings.viewMode;
       var cards = viewMode === 'cards' || viewMode === 'cards-grid';
       var large = viewMode === 'thumbs' || viewMode === 'large';
-
-      modal.disable();
-      modal.disableCancelBtn();
-      modal.disableSelectBtn();
-      modal.showFooterSpinner();
-      if (input.elementEditor) {
-        input.elementEditor.pause();
-      }
 
       var response = await Craft.sendActionRequest('POST', 'app/render-elements', {
         data: {
@@ -437,11 +895,28 @@
       if (Number(element.id) !== id) {
         throw new Error('The rendered asset does not match the selection.');
       }
-      var $newElement = input.createNewElement(element);
 
-      // Load any required assets before changing the field value, too.
       await Craft.appendHeadHtml(data.headHtml);
       await Craft.appendBodyHtml(data.bodyHtml);
+
+      return element;
+    },
+
+    // Native onModalSelect removes the replacement before requesting its new
+    // HTML. Prepare everything first so a failed request cannot erase a value.
+    _replaceIntoField: async function (input, modal, id, siteId, canSelect) {
+      var $oldElement = input._$replaceElement;
+
+      modal.disable();
+      modal.disableCancelBtn();
+      modal.disableSelectBtn();
+      modal.showFooterSpinner();
+      if (input.elementEditor) {
+        input.elementEditor.pause();
+      }
+
+      var element = await Craft.Polymedia._renderFieldElement(input, id, siteId);
+      var $newElement = input.createNewElement(element);
       if (input._$replaceElement !== $oldElement || !canSelect()) {
         throw new Error('The field changed while preparing the replacement.');
       }
@@ -473,12 +948,25 @@
         return true;
       }
 
+      return Craft.Polymedia._reportSelection(
+        Craft.Polymedia.selectIntoField(assetIndex, assetId)
+      );
+    },
+
+    finishFieldSelection: function (input, assetId) {
+      return Craft.Polymedia._reportSelection(
+        Craft.Polymedia.selectIntoInput(input, assetId)
+      );
+    },
+
+    _reportSelection: async function (selection) {
       try {
-        if (await Craft.Polymedia.selectIntoField(assetIndex, assetId)) {
+        if (await selection) {
           return true;
         }
       } catch (error) {
         // Creation/import succeeded, but field insertion did not.
+        console.warn('Polymedia: the media item could not be selected.', error);
       }
       Craft.cp.displayError(Craft.t(
         'polymedia',
@@ -497,11 +985,10 @@
   };
 
   /**
-   * Modal: live Mux library grid with import / reuse.
+   * Modal: the selected provider's video library with import / reuse.
    */
-  Craft.Polymedia.MuxBrowseModal = Garnish.Modal.extend({
-    assetIndex: null,
-    folderId: null,
+  Craft.Polymedia.VideoBrowseModal = Garnish.Modal.extend({
+    destination: null,
     page: 1,
     limit: 24,
     searchQuery: '',
@@ -515,26 +1002,22 @@
     $pager: null,
 
     init: function (settings) {
-      this.assetIndex = settings.assetIndex || null;
-      this.folderId = settings.folderId || null;
+      this.destination = settings.destination;
 
       // Not “fitted”: empty/loading states need a stable wide shell (CSS min-width).
       var $container = $(
         '<div class="modal polymedia-mux-modal" role="dialog" aria-label="' +
-          Craft.escapeHtml(Craft.t('polymedia', 'Browse Mux library')) +
+          Craft.escapeHtml(Craft.t('polymedia', 'Browse video library')) +
           '"/>'
       );
 
-      // Field pickers get Select actions on already-imported cards.
-      $container.toggleClass(
-        'is-field-picker',
-        Craft.Polymedia.isFieldPicker(this.assetIndex)
-      );
+      // Fields get Select actions on already-imported cards.
+      $container.toggleClass('is-field-picker', !!this.destination.selects);
 
       var $header = $(
         '<div class="header">' +
           '<h1>' +
-          Craft.escapeHtml(Craft.t('polymedia', 'Browse Mux library')) +
+          Craft.escapeHtml(Craft.t('polymedia', 'Browse video library')) +
           '</h1>' +
           '</div>'
       );
@@ -694,7 +1177,7 @@
       var search = this.searchQuery;
 
       this.page = page;
-      this.$status.text(Craft.t('polymedia', 'Loading Mux library…'));
+      this.$status.text(Craft.t('polymedia', 'Loading video library…'));
       this.$grid.empty();
       this.$pager.empty();
 
@@ -706,7 +1189,7 @@
         params.search = search;
       }
 
-      Craft.sendActionRequest('GET', 'polymedia/mux/library', {
+      Craft.sendActionRequest('GET', Craft.Polymedia.videoAction('library'), {
         params: params,
       })
         .then(function (response) {
@@ -723,7 +1206,7 @@
             self.$status.text(
               search
                 ? Craft.t('polymedia', 'No videos match your search.')
-                : Craft.t('polymedia', 'No Mux assets found.')
+                : Craft.t('polymedia', 'No videos found.')
             );
             self.updateSizeAndPosition();
             return;
@@ -760,7 +1243,7 @@
               error.response &&
               error.response.data &&
               error.response.data.message) ||
-            Craft.t('polymedia', 'Could not load Mux library.');
+            Craft.t('polymedia', 'Could not load video library.');
           self.$status.text(message);
           Craft.cp.displayError(message);
           self.updateSizeAndPosition();
@@ -859,11 +1342,10 @@
           '</span>';
       }
 
-      // In a field picker, an already-imported asset is directly selectable;
-      // on the plain Assets index there is nothing further to do with it.
-      var inFieldPicker = Craft.Polymedia.isFieldPicker(this.assetIndex);
+      // For a field, an already-imported asset is directly selectable; on
+      // the plain Assets index there is nothing further to do with it.
       var canSelectExisting =
-        inFieldPicker && item.alreadyImported && item.craftAssetId;
+        this.destination.selects && item.alreadyImported && item.craftAssetId;
 
       var actionLabel;
       var actionDisabled = false;
@@ -911,7 +1393,7 @@
       if (canSelectExisting) {
         $importBtn.on('click', async function () {
           $importBtn.addClass('loading').prop('disabled', true);
-          if (await Craft.Polymedia.finishSelection(self.assetIndex, item.craftAssetId)) {
+          if (await self.destination.finish(item.craftAssetId)) {
             self.hide();
           }
           $importBtn.removeClass('loading').prop('disabled', false);
@@ -934,19 +1416,21 @@
 
       $btn.addClass('loading').prop('disabled', true);
 
-      Craft.sendActionRequest('POST', 'polymedia/mux/import', {
-        data: {
-          muxAssetId: item.assetId,
-          folderId: this.folderId || '',
-          title: item.title || '',
-        },
+      var data = {
+        folderId: this.destination.folderId || '',
+        title: item.title || '',
+      };
+      data[Craft.Polymedia.videoProvider === 'bunny' ? 'videoId' : 'muxAssetId'] = item.assetId;
+
+      Craft.sendActionRequest('POST', Craft.Polymedia.videoAction('import'), {
+        data: data,
       })
         .then(async function (response) {
           var data = response.data || {};
           var message =
-            data.message || Craft.t('polymedia', 'Mux media imported.');
+            data.message || Craft.t('polymedia', 'Video imported.');
 
-          if (!await Craft.Polymedia.finishSelection(self.assetIndex, data.assetId)) {
+          if (!await self.destination.finish(data.assetId)) {
             $btn.removeClass('loading').prop('disabled', false);
             return;
           }
@@ -968,14 +1452,11 @@
   });
 
   /**
-   * Modal: direct upload a video to Mux via UpChunk, then create `.pmedia`.
+   * Modal: authorize, upload to the selected provider, then select the `.pmedia`.
    */
-  Craft.Polymedia.MuxUploadModal = Garnish.Modal.extend({
-    assetIndex: null,
-    folderId: null,
-    uploadId: null,
-    pollTimer: null,
-    upchunk: null,
+  Craft.Polymedia.VideoUploadModal = Garnish.Modal.extend({
+    destination: null,
+    uploadTask: null,
     busy: false,
     $title: null,
     $file: null,
@@ -988,18 +1469,17 @@
     $cancelBtn: null,
 
     init: function (settings) {
-      this.assetIndex = settings.assetIndex || null;
-      this.folderId = settings.folderId || null;
+      this.destination = settings.destination;
 
       var $container = $(
         '<div class="modal polymedia-mux-upload-modal" role="dialog" aria-label="' +
-          Craft.escapeHtml(Craft.t('polymedia', 'Upload to Mux')) +
+          Craft.escapeHtml(Craft.t('polymedia', 'Upload video')) +
           '"/>'
       );
 
       var $header = $(
         '<div class="header"><h1>' +
-          Craft.escapeHtml(Craft.t('polymedia', 'Upload to Mux')) +
+          Craft.escapeHtml(Craft.t('polymedia', 'Upload video')) +
           '</h1></div>'
       );
 
@@ -1045,7 +1525,7 @@
             Craft.escapeHtml(
               Craft.t(
                 'polymedia',
-                'Poster will be generated from the first frame when ready.'
+                'A poster is added from the video when it’s ready.'
               )
             ) +
             '</p>'
@@ -1171,7 +1651,13 @@
         return;
       }
 
-      if (typeof UpChunk === 'undefined' || !UpChunk.createUpload) {
+      // For a field, only upload what the field can still accept.
+      if (!this.destination.canAccept()) {
+        Craft.cp.displayError(Craft.t('polymedia', 'The field cannot accept another media item.'));
+        return;
+      }
+
+      if (!Craft.PolymediaVideoUpload) {
         Craft.cp.displayError(Craft.t('polymedia', 'Upload failed.'));
         return;
       }
@@ -1182,52 +1668,45 @@
       this._setProgress(0);
       this._setStatus(Craft.t('polymedia', 'Uploading…'));
 
-      Craft.sendActionRequest('POST', 'polymedia/mux/create-upload', {
-        data: {
-          title: this.$title.val() || '',
-          folderId: this.folderId || '',
-        },
-      })
-        .then(function (response) {
-          var data = response.data || {};
+      var context = { title: this.$title.val() || '' };
+      var destination = this.destination;
 
-          if (!data.uploadUrl || !data.uploadId) {
-            throw new Error(Craft.t('polymedia', 'Upload failed.'));
+      ['folderId', 'siteId', 'fieldId', 'elementId'].forEach(function (key) {
+        if (destination[key]) {
+          context[key] = destination[key];
+        }
+      });
+
+      var task = Craft.PolymediaVideoUpload(
+        file,
+        context,
+        function (percent) {
+          if (self.uploadTask !== task) {
+            return;
           }
 
-          self.uploadId = data.uploadId;
-          if (data.folderId) {
-            self.folderId = data.folderId;
+          self._setProgress(percent);
+
+          if (percent >= 100) {
+            self._setStatus(Craft.t('polymedia', 'Processing video…'));
+          }
+        }
+      );
+
+      this.uploadTask = task;
+      task.promise
+        .then(function (data) {
+          if (self.uploadTask !== task) {
+            return;
           }
 
-          self.upchunk = UpChunk.createUpload({
-            endpoint: data.uploadUrl,
-            file: file,
-            chunkSize: 5120,
-          });
-
-          self.upchunk.on('progress', function (ev) {
-            var pct =
-              typeof ev.detail === 'number'
-                ? ev.detail
-                : (ev.detail && ev.detail.progress) || 0;
-            self._setProgress(pct);
-          });
-
-          self.upchunk.on('error', function (ev) {
-            var msg =
-              (ev.detail && ev.detail.message) ||
-              Craft.t('polymedia', 'Upload failed.');
-            self._fail(msg);
-          });
-
-          self.upchunk.on('success', function () {
-            self._setProgress(100);
-            self._setStatus(Craft.t('polymedia', 'Processing on Mux…'));
-            self._pollStatus();
-          });
+          return self._complete(data);
         })
         .catch(function (error) {
+          if (self.uploadTask !== task) {
+            return;
+          }
+
           var message =
             (error &&
               error.response &&
@@ -1239,129 +1718,22 @@
         });
     },
 
-    _pollStatus: function () {
-      var self = this;
-      var attempts = 0;
-      var maxAttempts = 90;
+    _complete: async function (data) {
+      if (!await this.destination.finish(data.assetId)) {
+        this.busy = false;
+        this._setUiBusy(false);
+        this._setStatus(Craft.t('polymedia', 'Media created, but not selected.'));
+        return;
+      }
 
-      var tick = function () {
-        if (!self.busy) {
-          return;
-        }
-
-        attempts += 1;
-
-        // POST + body `data` (Craft/axios GET `data` is not sent as query params,
-        // so uploadId was missing and the endpoint returned 400 forever).
-        Craft.sendActionRequest('POST', 'polymedia/mux/upload-status', {
-          data: { uploadId: self.uploadId },
-        })
-          .then(function (response) {
-            var data = response.data || {};
-
-            if (data.failed) {
-              self._fail(
-                data.message || Craft.t('polymedia', 'Upload failed.')
-              );
-              return;
-            }
-
-            if (data.ready && data.assetId) {
-              self._complete(data.assetId);
-              return;
-            }
-
-            // Still waiting for Mux asset/playback id
-            if (data.status) {
-              self._setStatus(
-                Craft.t('polymedia', 'Processing on Mux…') +
-                  ' (' +
-                  data.status +
-                  ')'
-              );
-            }
-
-            if (attempts >= maxAttempts) {
-              self._fail(Craft.t('polymedia', 'Upload failed.'));
-              return;
-            }
-
-            self.pollTimer = setTimeout(tick, 2000);
-          })
-          .catch(function (error) {
-            var status =
-              error && error.response && error.response.status
-                ? error.response.status
-                : 0;
-            var message =
-              (error &&
-                error.response &&
-                error.response.data &&
-                error.response.data.message) ||
-              Craft.t('polymedia', 'Upload failed.');
-
-            // Auth/validation errors will not recover — stop immediately.
-            if (status === 400 || status === 403 || status === 404) {
-              self._fail(message);
-              return;
-            }
-
-            if (attempts >= maxAttempts) {
-              self._fail(message);
-              return;
-            }
-
-            self.pollTimer = setTimeout(tick, 3000);
-          });
-      };
-
-      tick();
-    },
-
-    _complete: function (muxAssetId) {
-      var self = this;
-
-      this._setStatus(Craft.t('polymedia', 'Creating media item…'));
-
-      Craft.sendActionRequest('POST', 'polymedia/mux/complete-upload', {
-        data: {
-          muxAssetId: muxAssetId,
-          uploadId: this.uploadId || '',
-          folderId: this.folderId || '',
-          title: this.$title.val() || '',
-        },
-      })
-        .then(async function (response) {
-          var data = response.data || {};
-          var message =
-            data.message || Craft.t('polymedia', 'Mux upload complete.');
-
-          if (!await Craft.Polymedia.finishSelection(self.assetIndex, data.assetId)) {
-            self.busy = false;
-            self._setUiBusy(false);
-            self._setStatus(Craft.t('polymedia', 'Media created, but not selected.'));
-            return;
-          }
-
-          Craft.cp.displayNotice(message);
-          self.busy = false;
-          self.hide();
-        })
-        .catch(function (error) {
-          var message =
-            (error &&
-              error.response &&
-              error.response.data &&
-              error.response.data.message) ||
-            Craft.t('polymedia', 'Upload failed.');
-          self._fail(message);
-        });
+      Craft.cp.displayNotice(data.message || Craft.t('polymedia', 'Video upload complete.'));
+      this.busy = false;
+      this.hide();
     },
 
     _fail: function (message) {
       this.busy = false;
-      this._clearTimers();
-      this._abortUpchunk();
+      this._abortUpload();
       this._setUiBusy(false);
       this._setStatus(message);
       Craft.cp.displayError(message);
@@ -1369,8 +1741,8 @@
 
     onCancel: function () {
       if (this.busy) {
-        this._abortUpchunk();
-        this._clearTimers();
+        // Stops the transfer only; a video the provider created stays there.
+        this._abortUpload();
         this.busy = false;
         this._setUiBusy(false);
         this._setStatus(Craft.t('polymedia', 'Upload cancelled.'));
@@ -1381,28 +1753,20 @@
     },
 
     onFadeOut: function () {
-      this._clearTimers();
-      this._abortUpchunk();
+      this._abortUpload();
       this.base();
     },
 
-    _abortUpchunk: function () {
-      if (this.upchunk && typeof this.upchunk.abort === 'function') {
+    _abortUpload: function () {
+      if (this.uploadTask && typeof this.uploadTask.abort === 'function') {
         try {
-          this.upchunk.abort();
+          this.uploadTask.abort();
         } catch (e) {
           // ignore
         }
       }
 
-      this.upchunk = null;
-    },
-
-    _clearTimers: function () {
-      if (this.pollTimer) {
-        clearTimeout(this.pollTimer);
-        this.pollTimer = null;
-      }
+      this.uploadTask = null;
     },
 
     _setUiBusy: function (busy) {

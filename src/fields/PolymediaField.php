@@ -12,6 +12,7 @@
 namespace boccdotdev\polymedia\fields;
 
 use boccdotdev\polymedia\Plugin;
+use boccdotdev\polymedia\services\FieldMedia;
 use Craft;
 use craft\base\ElementInterface;
 use craft\fields\Assets;
@@ -68,6 +69,8 @@ class PolymediaField extends Assets
     {
         $config['restrictFiles'] = true;
         $config['allowedKinds'] = ['polymedia'];
+        // Stored off; native upload is decided per render by automatic
+        // routing, so field config never depends on edition or credentials.
         $config['allowUploads'] = false;
 
         if (!isset($config['id'])) {
@@ -80,6 +83,49 @@ class PolymediaField extends Assets
         }
 
         parent::__construct($config);
+    }
+
+    /**
+     * Returns whether the field offers native upload for an element: only when
+     * new MP4s to its upload folder are routed to a provider it allows.
+     *
+     * @param ?ElementInterface $element the element being edited
+     * @return bool
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function getRoutesUploads(?ElementInterface $element): bool
+    {
+        $plugin = Plugin::getInstance();
+        $settings = $plugin->getSettings();
+
+        if (!$settings->autoRouteVideoUploads || $settings->videoUploadVolumeUids === [] || !$plugin->getVideoEnabled()) {
+            return false;
+        }
+
+        if ($this->allowedProviders !== [] && !in_array($settings->videoProvider, $this->allowedProviders, true)) {
+            return false;
+        }
+
+        $volumeUid = FieldMedia::uploadVolumeUid($this);
+
+        return $volumeUid !== null && in_array($volumeUid, $settings->videoUploadVolumeUids, true);
+    }
+
+    /**
+     * @inheritdoc
+     */
+    protected function inputHtml(mixed $value, ?ElementInterface $element, bool $inline): string
+    {
+        $original = $this->allowUploads;
+        $this->allowUploads = $this->getRoutesUploads($element);
+
+        try {
+            return parent::inputHtml($value, $element, $inline);
+        } finally {
+            $this->allowUploads = $original;
+        }
     }
 
     /**

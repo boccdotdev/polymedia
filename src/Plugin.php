@@ -24,7 +24,10 @@ use boccdotdev\polymedia\models\PlayerSettings;
 use boccdotdev\polymedia\models\Settings;
 use boccdotdev\polymedia\records\MediaItemRecord;
 use boccdotdev\polymedia\services\AssetFieldSettings;
+use boccdotdev\polymedia\services\Bunny;
+use boccdotdev\polymedia\services\BunnySync;
 use boccdotdev\polymedia\services\EditorContent;
+use boccdotdev\polymedia\services\FieldMedia;
 use boccdotdev\polymedia\services\ManifestWriter;
 use boccdotdev\polymedia\services\MediaItems;
 use boccdotdev\polymedia\services\Mux;
@@ -33,8 +36,10 @@ use boccdotdev\polymedia\services\ProviderFilter;
 use boccdotdev\polymedia\services\RelatedAssets;
 use boccdotdev\polymedia\services\Renderer;
 use boccdotdev\polymedia\services\SidecarStorage;
+use boccdotdev\polymedia\services\SourceAssets;
 use boccdotdev\polymedia\services\ThumbnailDeriver;
 use boccdotdev\polymedia\services\UrlDetector;
+use boccdotdev\polymedia\services\VideoUploads;
 use boccdotdev\polymedia\variables\PolymediaVariable;
 use boccdotdev\polymedia\web\assets\cp\PolymediaAsset;
 use Craft;
@@ -47,6 +52,7 @@ use craft\events\DefineAssetThumbUrlEvent;
 use craft\events\DefineAttributeHtmlEvent;
 use craft\events\DefineBehaviorsEvent;
 use craft\events\DefineElementEditorHtmlEvent;
+use craft\events\DefineFieldHtmlEvent;
 use craft\events\DefineGqlTypeFieldsEvent;
 use craft\events\FieldEvent;
 use craft\events\ModelEvent;
@@ -89,6 +95,11 @@ use yii\base\Event;
  * @property-read ProviderFilter $providerFilter
  * @property-read EditorContent $editorContent
  * @property-read Mux $mux
+ * @property-read Bunny $bunny
+ * @property-read BunnySync $bunnySync
+ * @property-read VideoUploads $videoUploads
+ * @property-read FieldMedia $fieldMedia
+ * @property-read SourceAssets $sourceAssets
  * @property-read PosterFetcher $posterFetcher
  * @property-read SidecarStorage $sidecarStorage
  *
@@ -106,7 +117,7 @@ class Plugin extends BasePlugin
     public const EDITION_LITE = 'lite';
 
     /**
-     * Commercial edition: Lite + Mux credentials, library browse, direct upload.
+     * Commercial edition: Lite + hosted video libraries (Mux, Bunny Stream) and direct uploads.
      */
     public const EDITION_PRO = 'pro';
 
@@ -166,6 +177,11 @@ class Plugin extends BasePlugin
             'providerFilter' => ProviderFilter::class,
             'editorContent' => EditorContent::class,
             'mux' => Mux::class,
+            'bunny' => Bunny::class,
+            'bunnySync' => BunnySync::class,
+            'videoUploads' => VideoUploads::class,
+            'fieldMedia' => FieldMedia::class,
+            'sourceAssets' => SourceAssets::class,
             'posterFetcher' => PosterFetcher::class,
             'sidecarStorage' => SidecarStorage::class,
         ]);
@@ -184,6 +200,7 @@ class Plugin extends BasePlugin
         $this->_registerAssetFieldSettingsUi();
         $this->_registerAssetFieldPersistence();
         $this->_registerAssetFieldValidation();
+        $this->_registerFieldMediaMenu();
         $this->_registerTwigVariable();
         $this->_registerCpAssets();
         $this->_registerGql();
@@ -214,6 +231,61 @@ class Plugin extends BasePlugin
     public function getMuxEnabled(): bool
     {
         return $this->getIsPro() && $this->getMux()->isConfigured();
+    }
+
+    /**
+     * Returns whether Bunny Stream API calls may run: Pro edition with a
+     * configured library.
+     *
+     * Not tied to the selected provider, so older Bunny assets can still be
+     * synchronized after switching to Mux.
+     *
+     * @return bool
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function getBunnyEnabled(): bool
+    {
+        return $this->getIsPro() && $this->getBunny()->isConfigured();
+    }
+
+    /**
+     * Returns whether a provider may accept new library imports and uploads.
+     *
+     * Only the selected provider does, and only with Pro and its credentials.
+     * Playback and synchronization of existing assets don't use this gate.
+     *
+     * @param string $provider `mux` or `bunny`
+     * @return bool
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function isVideoProviderEnabled(string $provider): bool
+    {
+        if ($provider !== $this->getSettings()->videoProvider) {
+            return false;
+        }
+
+        return match ($provider) {
+            Settings::PROVIDER_MUX => $this->getMuxEnabled(),
+            Settings::PROVIDER_BUNNY => $this->getBunnyEnabled(),
+            default => false,
+        };
+    }
+
+    /**
+     * Returns whether the selected provider accepts new imports and uploads.
+     *
+     * @return bool
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function getVideoEnabled(): bool
+    {
+        return $this->isVideoProviderEnabled($this->getSettings()->videoProvider);
     }
 
     /**
@@ -347,6 +419,71 @@ class Plugin extends BasePlugin
     }
 
     /**
+     * Returns the Bunny Stream service.
+     *
+     * @return Bunny
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function getBunny(): Bunny
+    {
+        return $this->get('bunny');
+    }
+
+    /**
+     * Returns the Bunny Stream import and sync service.
+     *
+     * @return BunnySync
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function getBunnySync(): BunnySync
+    {
+        return $this->get('bunnySync');
+    }
+
+    /**
+     * Returns the hosted video upload authorization service.
+     *
+     * @return VideoUploads
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function getVideoUploads(): VideoUploads
+    {
+        return $this->get('videoUploads');
+    }
+
+    /**
+     * Returns the field media destination service.
+     *
+     * @return FieldMedia
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function getFieldMedia(): FieldMedia
+    {
+        return $this->get('fieldMedia');
+    }
+
+    /**
+     * Returns the Craft-hosted video reference service.
+     *
+     * @return SourceAssets
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function getSourceAssets(): SourceAssets
+    {
+        return $this->get('sourceAssets');
+    }
+
+    /**
      * Returns the poster fetcher service.
      *
      * @return PosterFetcher
@@ -414,9 +551,13 @@ class Plugin extends BasePlugin
             'volumeOptions' => $volumeOptions,
             'isPro' => $this->getIsPro(),
             'muxConfigured' => $this->getMux()->isConfigured(),
+            'bunnyConfigured' => $this->getBunny()->isConfigured(),
             // Site action URL (actionUrl() would prepend the CP trigger here).
             'muxWebhookUrl' => UrlHelper::siteUrl(
                 Craft::$app->getConfig()->getGeneral()->actionTrigger . '/polymedia/webhooks/mux',
+            ),
+            'bunnyWebhookUrl' => UrlHelper::siteUrl(
+                Craft::$app->getConfig()->getGeneral()->actionTrigger . '/polymedia/webhooks/bunny',
             ),
         ]);
     }
@@ -476,8 +617,9 @@ class Plugin extends BasePlugin
      *
      * Soft delete leaves records intact for trash restore. Hard delete removes
      * the item record and its explicitly owned sidecar folder, and optionally
-     * deletes the remote Mux asset when
-     * {@see Settings::$deleteMuxAssetOnDelete} is enabled.
+     * deletes the remote Mux asset or Bunny video when
+     * {@see Settings::$deleteMuxAssetOnDelete} or
+     * {@see Settings::$deleteBunnyAssetOnDelete} is enabled.
      */
     private function _registerAssetDeleteHandler(): void
     {
@@ -515,6 +657,7 @@ class Plugin extends BasePlugin
                 $record = $deleting[(int)$asset->id] ?? null;
                 unset($deleting[(int)$asset->id]);
                 $this->_maybeDeleteMuxAsset($record);
+                $this->_maybeDeleteBunnyAsset($record);
 
                 $cleanup = function() use ($asset): bool {
                     $this->getSidecarStorage()->deleteForAsset($asset);
@@ -602,6 +745,43 @@ class Plugin extends BasePlugin
                 "Polymedia: failed to delete Mux asset {$muxAssetId}: {$e->getMessage()}",
                 __METHOD__,
             );
+        }
+    }
+
+    /**
+     * Deletes the remote Bunny video when the setting is on, Pro is active and
+     * the configured credentials belong to the video's own library.
+     *
+     * The selected provider doesn't matter: older Bunny assets keep their
+     * library. Failures are logged and don't block local Craft cleanup.
+     *
+     * @param ?MediaItemRecord $record the hard-deleted item
+     */
+    private function _maybeDeleteBunnyAsset(?MediaItemRecord $record): void
+    {
+        if (!$record || $record->type !== 'bunny' || !$this->getSettings()->deleteBunnyAssetOnDelete) {
+            return;
+        }
+
+        $metadata = $this->getMediaItems()->getMetadata($record);
+        $libraryId = (string)($metadata['bunnyLibraryId'] ?? '');
+        $videoId = (string)($metadata['bunnyVideoId'] ?? '');
+
+        if (!$this->getBunnyEnabled() || $videoId === '' || $libraryId === '' || $libraryId !== $this->getBunny()->getLibraryId()) {
+            Craft::warning(
+                "Polymedia: deleteBunnyAssetOnDelete is on, but Pro and credentials for the video's own Bunny library are required; " .
+                "skipping Bunny delete for Craft asset #{$record->assetId}.",
+                __METHOD__,
+            );
+
+            return;
+        }
+
+        try {
+            $this->getBunny()->deleteAsset($videoId);
+            Craft::info("Polymedia: deleted Bunny video {$videoId} after hard-delete of Craft asset #{$record->assetId}.", __METHOD__);
+        } catch (\Throwable $e) {
+            Craft::error("Polymedia: failed to delete Bunny video {$videoId}: {$e->getMessage()}", __METHOD__);
         }
     }
 
@@ -710,7 +890,7 @@ class Plugin extends BasePlugin
      * Reconciles orphaned `.pmedia` assets that have no `MediaItemRecord` row.
      *
      * Covers assets created by the asset indexer or manual file upload outside
-     * the plugin's “Add media → From URL” flow.
+     * the plugin's “Add video or audio → From URL” flow.
      */
     private function _registerAssetReconciler(): void
     {
@@ -869,6 +1049,11 @@ class Plugin extends BasePlugin
         $record = $this->getMediaItems()->getByAssetId($asset->id);
 
         if (!$record) {
+            return;
+        }
+
+        // Hosted videos keep their provider identity.
+        if ($this->getEditorContent()->isManagedVideo($record)) {
             return;
         }
 
@@ -1091,7 +1276,8 @@ class Plugin extends BasePlugin
     }
 
     /**
-     * Registers the CP asset bundle on CP requests and passes Mux feature flags.
+     * Registers the CP asset bundle on CP requests and passes non-secret
+     * video hosting feature flags.
      */
     private function _registerCpAssets(): void
     {
@@ -1104,26 +1290,45 @@ class Plugin extends BasePlugin
             View::EVENT_BEFORE_RENDER_TEMPLATE,
             function() {
                 $view = Craft::$app->getView();
+                $settings = $this->getSettings();
+                $routing = $this->getVideoEnabled() && $settings->autoRouteVideoUploads;
+                $routingFsTypes = [];
+
+                // Filesystem types of the routed volumes, so the CP can refuse
+                // a custom uploader there instead of storing raw MP4s.
+                if ($routing) {
+                    foreach (Craft::$app->getVolumes()->getAllVolumes() as $volume) {
+                        if (in_array($volume->uid, $settings->videoUploadVolumeUids, true)) {
+                            $routingFsTypes[] = get_class($volume->getFs());
+                        }
+                    }
+                }
+
                 $view->registerAssetBundle(PolymediaAsset::class);
                 $view->registerTranslations('polymedia', [
-                    'Add media',
+                    'Add video or audio',
+                    'Could not add video or audio.',
                     'From URL',
-                    'Paste a YouTube, Vimeo, Mux, HLS, or other media URL',
-                    'Browse Mux library',
-                    'Import a video already in your Mux account',
-                    'Upload to Mux',
-                    'Upload a video file directly to Mux',
-                    'Add media URL',
+                    'Paste a YouTube, Vimeo, HLS, or other media URL',
+                    'Browse video library',
+                    'Import a video from your video library',
+                    'Upload video',
+                    'Upload a video file to your video library',
+                    'Automatic video routing is unavailable for this filesystem. Use Upload video to send videos to the video library.',
+                    'Native uploads are disabled for this custom filesystem because it was selected for automatic video routing. Remove its volumes from automatic routing, or use Upload video.',
+                    'From existing asset',
+                    'Use a video asset without changing the original file',
+                    'Could not create media item.',
                     'Media item created.',
                     'Import',
                     'In Craft',
-                    'Loading Mux library…',
-                    'No Mux assets found.',
+                    'Loading video library…',
+                    'No videos found.',
                     'Search videos',
                     'No videos match your search.',
                     'Search is limited to the {count} most recent videos.',
-                    'Could not load Mux library.',
-                    'Mux media imported.',
+                    'Could not load video library.',
+                    'Video imported.',
                     'Already in Craft — using existing media item.',
                     'Previous',
                     'Next',
@@ -1137,19 +1342,23 @@ class Plugin extends BasePlugin
                     'No file chosen',
                     'Start upload',
                     'Uploading…',
-                    'Processing on Mux…',
-                    'Creating media item…',
-                    'Mux upload complete.',
+                    'Video upload complete.',
+                    'Processing video…',
+                    'The field cannot accept another media item.',
                     'Upload failed.',
                     'Upload cancelled.',
                     'Choose a video file.',
-                    'Poster will be generated from the first frame when ready.',
+                    'A poster is added from the video when it’s ready.',
                     'Cancel',
                 ]);
                 $view->registerJs(
                     'window.CraftPolymediaConfig = ' . Json::encode([
-                        'muxEnabled' => $this->getMuxEnabled(),
                         'isPro' => $this->getIsPro(),
+                        'videoProvider' => $settings->videoProvider,
+                        'videoEnabled' => $this->getVideoEnabled(),
+                        'autoRouteVideoUploads' => $routing,
+                        'videoUploadVolumeUids' => $routing ? array_values($settings->videoUploadVolumeUids) : [],
+                        'videoUploadFsTypes' => array_values(array_unique($routingFsTypes)),
                     ]) . ';',
                     View::POS_HEAD,
                 );
@@ -1201,6 +1410,7 @@ class Plugin extends BasePlugin
             function() {
                 MediaItemLoader::reset();
                 RelatedAssetLoader::reset();
+                $this->getSourceAssets()->reset();
             },
         );
     }
@@ -1231,12 +1441,15 @@ class Plugin extends BasePlugin
                 $poster = $this->getRelatedAssets()->getPoster((int)$record->id);
 
                 if ($poster) {
-                    $url = Craft::$app->getAssets()->getThumbUrl(
-                        $poster,
+                    // A `.pmedia` has no dimensions, so Craft asks for a square;
+                    // keep the poster's own shape, as Craft does for images.
+                    [$width, $height] = Assets::scaledDimensions(
+                        (int)$poster->width,
+                        (int)$poster->height,
                         $event->width,
                         $event->height,
-                        false,
                     );
+                    $url = Craft::$app->getAssets()->getThumbUrl($poster, $width, $height, false);
 
                     if ($url) {
                         $event->url = $url;
@@ -1384,6 +1597,36 @@ class Plugin extends BasePlugin
     });
 })();
 JS);
+            },
+        );
+    }
+
+    /**
+     * Renders the Add video or audio menu config right after the inputs of
+     * Assets fields that explicitly allow the Polymedia kind, for the CP
+     * script to pick up when the input initializes. Inline editing in element
+     * indexes doesn't get the menu.
+     */
+    private function _registerFieldMediaMenu(): void
+    {
+        if (!Craft::$app->getRequest()->getIsCpRequest()) {
+            return;
+        }
+
+        Event::on(
+            AssetsField::class,
+            AssetsField::EVENT_DEFINE_INPUT_HTML,
+            function(DefineFieldHtmlEvent $event) {
+                /** @var AssetsField $field */
+                $field = $event->sender;
+                $menu = $event->inline ? null : $this->getFieldMedia()->getMenu($field);
+
+                if ($menu !== null) {
+                    $event->html .= Html::tag('div', '', [
+                        'class' => 'hidden',
+                        'data' => ['polymedia-field-media' => $menu + ['fieldId' => (int)$field->id]],
+                    ]);
+                }
             },
         );
     }
