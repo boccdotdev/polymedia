@@ -159,6 +159,8 @@ class BunnySync extends Component
      * rejected rather than written.
      *
      * @param MediaItemRecord $record the bunny-type media item
+     * @param bool $checkRemotePoster also ask the CDN whether a thumbnail
+     *                                replaced in place has changed
      * @return ?MediaItemRecord the refreshed record, or null when it no longer exists
      * @throws \RuntimeException when the item belongs to another library, the
      *                           CDN isn't ready, or the item is busy or overtaken
@@ -167,7 +169,7 @@ class BunnySync extends Component
      * @author boccdotdev
      * @since 2.5.0
      */
-    public function syncRecord(MediaItemRecord $record): ?MediaItemRecord
+    public function syncRecord(MediaItemRecord $record, bool $checkRemotePoster = false): ?MediaItemRecord
     {
         $plugin = Plugin::getInstance();
         $items = $plugin->getMediaItems();
@@ -196,6 +198,6 @@ class BunnySync extends Component
             throw new \RuntimeException('Bunny playback has not reached the CDN yet. Retry synchronization.');
         }
 
-        return $items->applyBunnyVideoState($fresh, $state, $version);
+        return $items->applyBunnyVideoState($fresh, $state, $version, $checkRemotePoster);
     }
 }
