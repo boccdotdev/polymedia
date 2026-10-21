@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.6.0 - Unreleased
+
+### Added
+- `polymedia/migrate/prune-folders` lists the empty legacy folders that `polymedia/migrate/sidecars` leaves behind, and deletes them with `--apply`. A legacy folder is named after a `.pmedia` beside it plus 8 letters or digits, or sits inside one with a name that ends the same way. It's deleted only when it holds no assets, trashed or not, no other folders and no files on disk that Craft never indexed. Nested folders go deepest first, and every folder that stays is listed with the reason. ([#23](https://github.com/boccdotdev/polymedia/issues/23))
+
+### Changed
+- Replacing or removing a poster on the asset edit screen now deletes the old one when it's a file in the item's sidecar folder that nothing else uses, such as a fetched poster or an inline upload. Library images stay where they are. ([#27](https://github.com/boccdotdev/polymedia/issues/27))
+
 ## 2.5.1 - 2026-10-21
 
 ### Fixed

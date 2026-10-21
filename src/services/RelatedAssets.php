@@ -341,7 +341,8 @@ class RelatedAssets extends Component
      *
      * Accepts the raw `polymediaPoster` submission (an asset ID, a single-element
      * array of one, or empty to clear). Non-image assets and assets the current
-     * user can't view are ignored.
+     * user can't view are ignored. A poster this replaces or removes is deleted
+     * when it's a file in the item's own sidecar folder that nothing else uses.
      *
      * @param MediaItemRecord $record the media item record
      * @param mixed $posterIds the submitted poster value
@@ -375,6 +376,8 @@ class RelatedAssets extends Component
             $posterAssetId = (int)$posterIds ?: null;
         }
 
+        $previous = $this->getPoster((int)$record->id);
+
         if ($posterAssetId) {
             $posterAsset = Craft::$app->getAssets()->getAssetById($posterAssetId);
 
@@ -395,6 +398,44 @@ class RelatedAssets extends Component
             );
         } else {
             $this->clearPoster($record->id);
+        }
+
+        if ($previous && (int)$previous->id !== (int)$posterAssetId) {
+            $this->_deleteManagedPoster($previous, $record);
+        }
+    }
+
+    /**
+     * Deletes a poster an editor replaced or removed, when Polymedia manages it.
+     *
+     * Only a file in the item's own sidecar folder that nothing else uses is
+     * deleted. Nobody can pick it again from there, so it would only be left
+     * behind. A library image the editor chose earlier stays.
+     *
+     * @param Asset $poster the previous poster
+     * @param MediaItemRecord $record the media item
+     */
+    private function _deleteManagedPoster(Asset $poster, MediaItemRecord $record): void
+    {
+        $storage = Plugin::getInstance()->getSidecarStorage();
+        $volume = $storage->getVolume();
+        $folder = Craft::$app->getAssets()->getFolderById((int)$poster->folderId);
+
+        if (!$volume || !$folder || (int)$folder->volumeId !== (int)$volume->id) {
+            return;
+        }
+
+        if (!$storage->isItemFolder($folder, (string)$record->assetUid)
+            || $storage->isSharedAsset((int)$poster->id, (int)$record->id)
+        ) {
+            return;
+        }
+
+        try {
+            Craft::$app->getElements()->deleteElement($poster, true);
+        } catch (\Throwable $e) {
+            // The new poster is saved; an orphaned file is the lesser failure.
+            Craft::warning("Could not delete replaced poster #{$poster->id}: {$e->getMessage()}", __METHOD__);
         }
     }
 
