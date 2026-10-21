@@ -247,8 +247,8 @@
     },
 
     /**
-     * Adds the Add video or audio menu beside a field's Add an asset and
-     * Upload a file buttons, when the server rendered the field's menu.
+     * Adds the Add video or audio menu after a field's Add an asset button,
+     * when the server rendered the field's menu.
      *
      * @param {Craft.AssetSelectInput} input
      */
@@ -282,16 +282,9 @@
       }
 
       var menu = Craft.Polymedia._createMenuButton('dashed polymedia-field-media-btn');
-      // Upload a file opens the file input right after it, so go after both.
-      var $anchor = input.$uploadBtn
-        ? input.$uploadBtn.nextAll('input[type=file]').first()
-        : $();
-
-      if (!$anchor.length) {
-        $anchor = input.$uploadBtn || $addBtn;
-      }
-
-      menu.$btn.insertAfter($anchor);
+      // Between Add an asset and Upload a file. Upload a file opens the file
+      // input that follows it, so nothing may go after it.
+      menu.$btn.insertAfter($addBtn);
       Craft.Polymedia._initMenu(menu.$btn, menu.$menu, items, function () {
         return Craft.Polymedia.fieldDestination(input);
       });

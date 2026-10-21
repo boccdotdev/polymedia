@@ -567,7 +567,6 @@ function fieldSetup({ config = { items: ['url', 'existing'], canAdd: true }, ...
   const query = fakeQuery();
   const s = setup({ ...options, $: query.$ });
   s.Craft.escapeHtml = (value) => value;
-  const fileInput = { length: 1, name: 'file input' };
   const states = [];
   Object.assign(s.input, {
     settings: {
@@ -582,7 +581,6 @@ function fieldSetup({ config = { items: ['url', 'existing'], canAdd: true }, ...
       nextAll: () => ({ first: () => (config ? { length: 1, data: () => config } : { length: 0 }) }),
     },
     $addElementBtn: { length: 1, prop: () => false },
-    $uploadBtn: { nextAll: () => ({ first: () => fileInput }) },
     enableAddElementsBtn() { states.push('enable'); },
     disableAddElementsBtn() { states.push('disable'); },
     updateAddElementsBtn() {
@@ -591,7 +589,7 @@ function fieldSetup({ config = { items: ['url', 'existing'], canAdd: true }, ...
     },
     updateDisabledElementsInModal() {},
   });
-  return { ...s, fileInput, states, nodes: query.nodes };
+  return { ...s, states, nodes: query.nodes };
 }
 
 test('the field button needs the field menu and permission to add', () => {
@@ -607,15 +605,15 @@ test('the field button needs the field menu and permission to add', () => {
   assert.equal(lite.nodes.length, 0);
 });
 
-test('the field button sits after Upload a file and hides when the field is full', () => {
+test('the field button sits after Add an asset and hides when the field is full', () => {
   const selected = [];
   const s = fieldSetup({ selected, limit: 1, config: { items: ['url', 'existing', 'upload'], canAdd: true } });
   s.picker.initFieldButton(s.input);
   const [button, menu] = s.nodes;
   assert.ok(button.html.includes('Add video or audio'));
   assert.ok(button.classes.has('dashed'));
-  // After the file input, which Upload a file opens as its next sibling.
-  assert.equal(button.placedAfter, s.fileInput);
+  // Before Upload a file, which opens the file input right after it.
+  assert.equal(button.placedAfter, s.input.$addElementBtn);
   assert.deepEqual(menu.menu.items.map((item) => item.label), ['From URL', 'From existing asset']);
   assert.equal(button.classes.has('hidden'), false);
   assert.deepEqual(s.states, ['enable']);
