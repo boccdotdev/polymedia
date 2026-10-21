@@ -756,7 +756,7 @@ Assets expose a `polymedia` field on the GraphQL Asset interface — `null` for 
 
 ### Video hosting and asset workflows
 
-Added in 2.5.0 (unreleased, pending live provider testing):
+Added in 2.5.0:
 
 - [x] Bunny Stream integration for Pro: library browsing and search, import, resumable direct uploads, poster and metadata syncing, optional signed webhooks and console sync.
 - [x] One developer-selected hosting provider, Mux or Bunny, with provider-neutral **Browse video library** and **Upload video** actions for authors. Existing assets keep their original provider.
