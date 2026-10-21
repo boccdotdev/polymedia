@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.5.0 - Unreleased
+## 2.5.0 - 2026-10-21
 
 ### Added
 - Bunny Stream hosting for Pro: library browsing and search, import, signed resumable direct uploads (tus), status, duration, dimension, MP4 and poster syncing, and `polymedia/bunny/sync`. Imported videos keep the library ID, video ID and native `*.b-cdn.net` host they were imported with. ([#10](https://github.com/boccdotdev/polymedia/issues/10), [#12](https://github.com/boccdotdev/polymedia/issues/12))
