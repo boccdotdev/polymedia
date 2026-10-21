@@ -281,7 +281,14 @@ Keep the previous volume and filesystem available while any retained files still
 
 The dry run reports `planned` moves without creating folders or changing files. Execution reports `moved`, `kept`, and `failed` results with asset IDs and destinations. Failed moves are not counted as successful, and any failure produces a non-zero exit code. Correct the reported problem and rerun the command; files already moved to the selected sidecar volume are skipped.
 
-The command never deletes a legacy folder. Only remove folders after verifying they are empty; folders containing retained posters or tracks must remain.
+`migrate/sidecars` never deletes a legacy folder. To clear out the empty ones, list them first, then delete them:
+
+```bash
+php craft polymedia/migrate/prune-folders
+php craft polymedia/migrate/prune-folders --apply
+```
+
+A legacy folder is named after a `.pmedia` beside it plus 8 letters or digits, as Polymedia 1.2 to 2.1 named them. A folder inside one counts too when its name ends the same way. The command deletes a folder only when it holds no assets, trashed or not, no other folders, and no files on disk that Craft never indexed. Nested folders go deepest first, so a chain of empty ones clears in one run. Every folder that stays is listed with the reason, such as a kept poster or another item's `.pmedia`. To clear a folder that holds another item's `.pmedia`, move that `.pmedia` out and run the command again.
 
 ## Front-End Setup
 
@@ -651,6 +658,8 @@ When creating media **without** a user-selected poster:
 5. Last resort: remote thumbnail URL only in manifest metadata (CP may show it until a local poster exists).
 
 CP asset index / picker thumbs for `.pmedia` files use the related poster when present, at the poster's own aspect ratio. Otherwise they use the thumbnail URL stored on the item, or one derived from the provider when none is stored.
+
+Replacing or removing a poster on the asset edit screen deletes the old one when it's a file in the item's sidecar folder that nothing else uses, such as a fetched poster or an inline upload. A library image you chose stays where it is.
 
 ## Accessibility
 
