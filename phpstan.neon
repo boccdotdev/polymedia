@@ -5,3 +5,10 @@ parameters:
     level: 5
     paths:
         - src
+    ignoreErrors:
+        # Assets::resolveSubpath() is Craft 5.9+; FieldMedia falls back on older 5.x.
+        -
+            message: '#resolveSubpath#'
+            identifier: function.alreadyNarrowedType
+            path: src/services/FieldMedia.php
+            reportUnmatched: false
