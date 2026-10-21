@@ -334,7 +334,7 @@ class MuxConcurrencyTest extends TestCase
     public function testPosterJobRetriesFailureUnlessItemDisappeared(bool $disappeared): void
     {
         $mux = $this->createMock(\boccdotdev\polymedia\services\Mux::class);
-        $mux->method('firstFrameThumbnailUrl')->willReturn('https://example.test/poster');
+        $mux->method('thumbnailUrl')->willReturn('https://example.test/poster');
         $this->plugin->method('getMux')->willReturn($mux);
         $fetcher = $this->createMock(PosterFetcher::class);
         $fetcher->method('fetchForItem')->willReturnCallback(function() use ($disappeared): never {

@@ -16,6 +16,8 @@ use boccdotdev\polymedia\Plugin;
 use Craft;
 use craft\base\ElementInterface;
 use craft\elements\Asset;
+use craft\errors\InvalidFsException;
+use craft\errors\InvalidSubpathException;
 use craft\fields\Assets as AssetsField;
 use craft\helpers\Json;
 use craft\models\VolumeFolder;
@@ -326,11 +328,12 @@ class VideoUploads extends Component
      * Resolves the destination folder, field and owner element.
      *
      * An explicit folder that's invalid or not writable is refused, never
-     * swapped for another volume.
+     * swapped for another volume. As with Craft's uploads, the user's own
+     * temporary upload folder is accepted, but routed MP4s never go there.
      *
      * @param array $input `folderId`, `fieldId`, `elementId`, `siteId`, `routing`
      * @return array{0: VolumeFolder, 1: ?AssetsField, 2: ?ElementInterface}
-     * @throws ForbiddenHttpException when the user can't upload there
+     * @throws ForbiddenHttpException when the user can't upload there or the field's upload location is invalid
      * @throws BadRequestHttpException when the field isn't an Assets field
      */
     private function _destination(array $input): array
@@ -343,26 +346,14 @@ class VideoUploads extends Component
         $fieldId = (int)($input['fieldId'] ?? 0);
 
         if ($fieldId > 0) {
-            $field = Craft::$app->getFields()->getFieldById($fieldId);
-
-            if (!$field instanceof AssetsField) {
-                throw new BadRequestHttpException('The upload field is not an Assets field.');
-            }
-
-            if (!empty($input['elementId'])) {
-                $owner = Craft::$app->getElements()->getElementById((int)$input['elementId'], null, (int)($input['siteId'] ?? 0) ?: null);
-
-                if (!$owner || !$user || !$owner->canSave($user)) {
-                    throw new ForbiddenHttpException('You cannot upload into this element.');
-                }
-
-                if (!$owner->getFieldLayout()?->getFieldById($fieldId)) {
-                    throw new ForbiddenHttpException('The upload field does not belong to this element.');
-                }
-            }
+            [$field, $owner] = $plugin->getFieldMedia()->resolveField($input);
 
             if (!$folderId) {
-                $folderId = (int)$field->resolveDynamicPathToFolderId($owner);
+                try {
+                    $folderId = (int)$field->resolveDynamicPathToFolderId($owner);
+                } catch (InvalidFsException | InvalidSubpathException $e) {
+                    throw new ForbiddenHttpException($e->getMessage(), 0, $e);
+                }
             }
         }
 
@@ -374,7 +365,9 @@ class VideoUploads extends Component
             $folder = null;
         }
 
-        if (!$folder || !$user || !$user->can('saveAssets:' . $folder->getVolume()->uid)) {
+        $temporary = $folder && $user && empty($input['routing']) && ManifestWriter::isTemporaryFolder($folder, $user);
+
+        if (!$folder || !$user || (!$temporary && ($folder->volumeId === null || !$user->can('saveAssets:' . $folder->getVolume()->uid)))) {
             throw new ForbiddenHttpException('Choose a writable asset folder for the video.');
         }
 
@@ -407,9 +400,7 @@ class VideoUploads extends Component
             throw new ForbiddenHttpException('This field must allow the Polymedia file kind before videos can be uploaded into it.');
         }
 
-        $allowed = $field instanceof PolymediaField
-            ? $field->allowedProviders
-            : Plugin::getInstance()->getAssetFieldSettings()->getAllowedProviders((string)$field->uid);
+        $allowed = Plugin::getInstance()->getFieldMedia()->getAllowedProviders($field);
 
         if ($allowed !== [] && !in_array($provider, $allowed, true)) {
             throw new ForbiddenHttpException('This field does not allow the configured video provider.');
@@ -437,24 +428,7 @@ class VideoUploads extends Component
             throw new ForbiddenHttpException('Uploads are disabled for this field.');
         }
 
-        if ($field->restrictLocation) {
-            $rootId = (int)$field->resolveDynamicPathToFolderId($owner);
-            $candidate = $folder;
-
-            while ($candidate && (int)$candidate->id !== $rootId && $field->allowSubfolders && $candidate->parentId) {
-                $candidate = Craft::$app->getAssets()->getFolderById((int)$candidate->parentId);
-            }
-
-            if (!$candidate || (int)$candidate->id !== $rootId) {
-                throw new ForbiddenHttpException('The destination is outside this field’s upload location.');
-            }
-
-            return;
-        }
-
-        if (is_array($field->sources) && !in_array('volume:' . $folder->getVolume()->uid, $field->sources, true)) {
-            throw new ForbiddenHttpException('The destination volume is not available to this field.');
-        }
+        Plugin::getInstance()->getFieldMedia()->checkLocation($field, $owner, $folder);
     }
 
     /**

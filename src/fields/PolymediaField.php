@@ -12,6 +12,7 @@
 namespace boccdotdev\polymedia\fields;
 
 use boccdotdev\polymedia\Plugin;
+use boccdotdev\polymedia\services\FieldMedia;
 use Craft;
 use craft\base\ElementInterface;
 use craft\fields\Assets;
@@ -107,30 +108,9 @@ class PolymediaField extends Assets
             return false;
         }
 
-        $volumeUid = $this->_uploadVolumeUid();
+        $volumeUid = FieldMedia::uploadVolumeUid($this);
 
         return $volumeUid !== null && in_array($volumeUid, $settings->videoUploadVolumeUids, true);
-    }
-
-    /**
-     * Returns the UID of the volume new uploads go to.
-     *
-     * Mirrors how Craft resolves the upload volume when rendering the field:
-     * from the location source only. Resolving the dynamic subpath here would
-     * create folders on every render.
-     *
-     * @return ?string
-     */
-    private function _uploadVolumeUid(): ?string
-    {
-        $sourceKey = $this->restrictLocation ? $this->restrictedLocationSource : $this->defaultUploadLocationSource;
-        $parts = is_string($sourceKey) ? explode(':', $sourceKey, 2) : [];
-
-        if (count($parts) !== 2 || $parts[0] !== 'volume') {
-            return null;
-        }
-
-        return Craft::$app->getVolumes()->getVolumeByUid($parts[1])?->uid;
     }
 
     /**

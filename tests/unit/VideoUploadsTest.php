@@ -12,6 +12,7 @@ use boccdotdev\polymedia\controllers\VideoUploadsController;
 use boccdotdev\polymedia\fields\PolymediaField;
 use boccdotdev\polymedia\models\Settings;
 use boccdotdev\polymedia\Plugin;
+use boccdotdev\polymedia\services\FieldMedia;
 use boccdotdev\polymedia\services\ManifestWriter;
 use boccdotdev\polymedia\services\Mux;
 use boccdotdev\polymedia\services\VideoUploads;
@@ -66,13 +67,14 @@ class VideoUploadsTest extends TestCase
         $this->uploads = new VideoUploads();
 
         $plugin = $this->getMockBuilder(Plugin::class)->disableOriginalConstructor()
-            ->onlyMethods(['getSettings', 'getIsPro', 'getMux', 'getManifestWriter', 'getVideoUploads'])->getMock();
+            ->onlyMethods(['getSettings', 'getIsPro', 'getMux', 'getManifestWriter', 'getVideoUploads', 'getFieldMedia'])->getMock();
         $plugin->method('getSettings')->willReturn($this->settings);
         $plugin->method('getIsPro')->willReturnCallback(fn() => $this->pro);
         $mux = $this->createMock(Mux::class);
         $mux->method('isConfigured')->willReturnCallback(fn() => $this->configured);
         $plugin->method('getMux')->willReturn($mux);
         $plugin->method('getVideoUploads')->willReturn($this->uploads);
+        $plugin->method('getFieldMedia')->willReturn(new FieldMedia());
         $writer = $this->createMock(ManifestWriter::class);
         // Explicit invalid destinations must never resolve a fallback.
         $writer->expects(self::never())->method('resolveFolder');
@@ -103,6 +105,7 @@ class VideoUploadsTest extends TestCase
         $app->method('getMutex')->willReturn($mutex);
         $assets = $this->createMock(\craft\services\Assets::class);
         $assets->method('getFolderById')->willReturnCallback(fn($id) => $this->folders[$id] ?? null);
+        $assets->method('getUserTemporaryUploadFolder')->willReturnCallback(fn() => $this->folders[40]);
         $app->method('getAssets')->willReturn($assets);
         $fields = $this->createMock(\craft\services\Fields::class);
         $fields->method('getFieldById')->willReturnCallback(fn($id) => $this->fields[$id] ?? null);
@@ -114,7 +117,16 @@ class VideoUploadsTest extends TestCase
         foreach ([10 => 'videos', 20 => 'ordinary', 30 => 'sidecar'] as $id => $uid) {
             $folder = $this->getMockBuilder(VolumeFolder::class)->onlyMethods(['getVolume'])->getMock();
             $folder->id = $id;
+            $folder->volumeId = $id;
             $folder->method('getVolume')->willReturn(new Volume(['id' => $id, 'uid' => $uid]));
+            $this->folders[$id] = $folder;
+        }
+
+        // The user's temporary upload folder, and someone else's.
+        foreach ([40, 41] as $id) {
+            $folder = $this->getMockBuilder(VolumeFolder::class)->onlyMethods(['getVolume'])->getMock();
+            $folder->id = $id;
+            $folder->method('getVolume')->willReturn(new Volume(['uid' => null]));
             $this->folders[$id] = $folder;
         }
     }
@@ -454,6 +466,31 @@ class VideoUploadsTest extends TestCase
 
         $this->expectException(ForbiddenHttpException::class);
         $this->start(['routing' => true, 'fieldId' => 7]);
+    }
+
+    public function testFieldUploadForANewEntryUsesTheUsersTemporaryFolder(): void
+    {
+        $this->field(40)->sources = ['volume:videos'];
+        $this->writable = false;
+
+        self::assertSame(40, $this->start(['fieldId' => 7, 'folderId' => 0])['folderId']);
+        $this->uploads->createUpload('mux', static fn() => ['uploadId' => 'remote-1']);
+        self::assertSame(40, $this->uploads->completeUpload('mux', 'remote-1')['folderId']);
+    }
+
+    public static function temporaryFailures(): array
+    {
+        return ['routed MP4' => [40, true], 'another user\'s folder' => [41, false]];
+    }
+
+    #[DataProvider('temporaryFailures')]
+    public function testOnlyExplicitUploadsUseOnlyTheirOwnTemporaryFolder(int $folder, bool $routing): void
+    {
+        $this->_enableRouting();
+        $this->field($folder);
+
+        $this->expectException(ForbiddenHttpException::class);
+        $this->uploads->preflight(['fieldId' => 7, 'routing' => $routing, 'filename' => 'film.mp4']);
     }
 
     // Protected Methods

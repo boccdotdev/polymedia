@@ -619,10 +619,28 @@ class Mux extends Component
     }
 
     /**
+     * Builds the Mux Image API thumbnail URL for a playback id.
+     *
+     * Without a `time`, Mux uses the asset's chosen thumbnail time, or else
+     * the middle of the video: the same image the Mux dashboard shows.
+     *
+     * @param string $playbackId public (or signed) playback id
+     * @return string
+     *
+     * @author boccdotdev
+     * @since 2.5.0
+     */
+    public function thumbnailUrl(string $playbackId): string
+    {
+        return "https://image.mux.com/{$playbackId}/thumbnail.jpg";
+    }
+
+    /**
      * Builds the first-frame Mux Image API thumbnail URL for a playback id.
      *
      * @param string $playbackId public (or signed) playback id
      * @return string
+     * @deprecated in 2.5.0. Use {@see thumbnailUrl()}, which matches the Mux dashboard.
      *
      * @author boccdotdev
      * @since 2.0.0
@@ -657,7 +675,7 @@ class Mux extends Component
         $thumbnailUrl = null;
 
         if ($playbackId !== null && $playbackId !== '') {
-            $thumbnailUrl = $this->firstFrameThumbnailUrl($playbackId);
+            $thumbnailUrl = $this->thumbnailUrl($playbackId);
         }
 
         return [

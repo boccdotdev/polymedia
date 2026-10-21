@@ -6,7 +6,6 @@
 .DS_Store
 .idea/
 .vscode/
-/PLUGIN_STORE.md
 /docs/
 /CLAUDE.md
 /.claude/

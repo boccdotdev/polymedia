@@ -59,10 +59,13 @@ On non-public domains Craft allows unlicensed Pro for development (normal Craft 
 
 ## Adding Media
 
-Open the **Add media** menu and choose **From URL**, paste any supported URL, and give it a title. The plugin auto-detects the provider type and creates a `.pmedia` manifest asset. **From existing asset** wraps a video that's already in Craft (see [Reference an existing Craft video](#reference-an-existing-craft-video)). With Pro and a configured hosting provider, the menu also offers **Browse video library** and **Upload video**. The menu is available in two places:
+Open the **Add video or audio** menu and choose **From URL**, paste any supported URL, and give it a title. The plugin auto-detects the provider type and creates a `.pmedia` manifest asset. **From existing asset** wraps a video that's already in Craft (see [Reference an existing Craft video](#reference-an-existing-craft-video)). With Pro and a configured hosting provider, the menu also offers **Browse video library** and **Upload video**. The menu is available in three places:
 
-- **Assets index** — sits beside **Upload files**. The manifest lands in the volume/folder you're currently browsing, exactly like an uploaded file.
-- **Field selection modals** — when picking media for a Polymedia or Assets field. The manifest lands in the field's upload location.
+- **Assets index:** beside **Upload files**. The manifest lands in the volume/folder you're currently browsing, exactly like an uploaded file.
+- **Fields:** between **Add an asset** and **Upload a file** on Polymedia fields and on Assets fields that explicitly allow the Polymedia file kind. The manifest lands in the field's upload location and is selected into the field straight away, including in Matrix, nested entries and slideouts. On a new entry whose upload location depends on something not set yet, such as `{slug}`, it goes to your temporary uploads and Craft moves it into place when you save, as with uploaded files. The button hides while the field is full. It isn't shown on Assets fields with **Allow uploads** off, or if you can't save assets to the field's upload location.
+- **Field selection modals:** when picking media for a Polymedia or Assets field. The manifest lands in the folder you're browsing and is selected into the field.
+
+For a field, the menu only offers what the field's **Allowed Providers** accept: **From URL** for URL providers, **From existing asset** for MP4, and the library and upload items for the selected hosting provider. **From URL** only offers and saves the field's allowed providers. Image-only and unrestricted Assets fields don't get the field button.
 
 No volume picker: the target follows your current location. When there's no current location, it falls back to the configured default volume, then the first ordinary volume you can write to. A current folder you can't write to is refused rather than swapped for another volume. The sidecar volume is never a manifest destination. If no writable library volume is available, creation stops with an error.
 
@@ -82,7 +85,7 @@ Imported and uploaded videos show their media URL and type as read-only technica
 
 ### Reference an existing Craft video
 
-**Add media → From existing asset** works in Lite. Pick a public MP4, WebM or MOV asset, and Polymedia creates (or reuses) a `.pmedia` that points at it, without copying, moving or deleting the original.
+**Add video or audio → From existing asset** works in Lite. Pick a public MP4, WebM or MOV asset, and Polymedia creates (or reuses) a `.pmedia` that points at it, without copying, moving or deleting the original.
 
 The `.pmedia` stores an `asset:<uid>` reference, never a copied public or signed URL. Twig helpers and GraphQL resolve the source's current URL, so moving or renaming the source keeps working. When the source is trashed or deleted, the reference plays nothing. Deleting the reference never deletes the source.
 
@@ -144,7 +147,7 @@ In those volumes, an MP4 uploaded with Craft's normal **Upload files** button or
 
 1. Install **Pro**, select **Mux** under **Video Hosting** and open **Mux Connection**.
 2. Add the Mux API **Token ID** and **Token Secret** to each environment, then select their references in plugin settings (for example `$MUX_TOKEN_ID` and `$MUX_TOKEN_SECRET`). Polymedia rejects literal credentials so they cannot be written to project config.
-3. On the Assets index (or field asset modal), open the **Add media** menu and use:
+3. On the Assets index, a field or a field's asset modal, open the **Add video or audio** menu and use:
    - **Browse video library**: a live list from your Mux account; import creates a `.pmedia` or reuses one matched by playback ID.
    - **Upload video**: a browser direct upload (UpChunk); when Mux has a playback ID, Craft creates or reuses the `.pmedia`.
 
@@ -641,11 +644,11 @@ When creating media **without** a user-selected poster:
 
 1. **User poster** (create screen or asset editor) always wins — never overwritten by auto-fetch.
 2. Else if **Auto-Fetch Poster** is on (URL create), or always for **Mux library/upload** imports: download a still into the item's folder in the sidecar volume and attach it as the poster.
-3. **Mux** uses the Image API first frame: `https://image.mux.com/{playbackId}/thumbnail.jpg?time=0` (Mux’s default without `time` is mid-video).
+3. **Mux** uses Mux's own thumbnail, `https://image.mux.com/{playbackId}/thumbnail.jpg`: the asset's chosen thumbnail time, or else the middle of the video, the same image the Mux dashboard shows.
 4. If the Mux image is not ready yet, a queue job retries with backoff.
 5. Last resort: remote thumbnail URL only in manifest metadata (CP may show it until a local poster exists).
 
-CP asset index / picker thumbs for `.pmedia` files use the related poster when present, else the remote thumbnail URL.
+CP asset index / picker thumbs for `.pmedia` files use the related poster when present, at the poster's own aspect ratio, else the remote thumbnail URL.
 
 ## Accessibility
 

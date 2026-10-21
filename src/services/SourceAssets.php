@@ -116,7 +116,7 @@ class SourceAssets extends Component
             }
 
             return $plugin->getManifestWriter()->create(
-                volumeId: (int)$folder->volumeId,
+                volumeId: $folder->volumeId,
                 folderId: (int)$folder->id,
                 detection: new DetectionResult([
                     'type' => 'mp4',

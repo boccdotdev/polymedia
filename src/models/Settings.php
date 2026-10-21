@@ -185,7 +185,7 @@ class Settings extends Model
 
     /**
      * @var bool Download derived thumbnail as poster on URL asset creation when no user poster is set.
-     * Mux library imports always attempt a first-frame poster regardless of this setting.
+     * Mux library imports always attempt a poster regardless of this setting.
      * @since 1.0.0
      */
     public bool $autoFetchPoster = true;
